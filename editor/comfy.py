@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 import requests
 from . import media
 from .store import uid, segment_source, apply_generated_take
-from .workflows import h3_graph, speech_graph, encode_graph, validate_graph, h3_frames
+from .workflows import h3_graph, speech_graph, encode_graph, validate_graph, h3_frames, h3_cloud_graph
 
 
 class Comfy:
@@ -53,6 +53,12 @@ class JobRunner:
         self.stop = threading.Event()
         self.thread = threading.Thread(target=self.loop, daemon=True)
 
+    def client(self, j):
+        if j.get('inference')=='cloud':
+            from .cloud import CloudComfy
+            return CloudComfy(self.store.root)
+        return Comfy(j['comfy_url'])
+
     def start(self):
         self.thread.start()
 
@@ -73,7 +79,7 @@ class JobRunner:
 
     def run(self, j):
         s = self.store
-        c = Comfy(j['comfy_url'])
+        c = self.client(j)
         if j['status'] != 'recovering':
             with s.lock:
                 if self.cancelled(j['id']):
@@ -119,22 +125,44 @@ class JobRunner:
             if self.cancelled(j['id']):
                 s.update_job(j['id'], status='cancelled', finished=time.time())
                 return
+            if j['kind']=='splat':
+                from .set_studio import ply_info,register_splat
+                target=s.root/'assets'/f'{uid()}.ply'
+                try:
+                    c.download(ply_info(history),target)
+                    if self.cancelled(j['id']):
+                        target.unlink(missing_ok=True)
+                        s.update_job(j['id'],status='cancelled',finished=time.time())
+                        return
+                    item=register_splat(s,target,j['name'],j['spec']['image_id'])
+                except Exception:target.unlink(missing_ok=True);raise
+                s.update_job(j['id'],status='completed',stage='Splat ready in Set Studio',progress=100,splat_id=item['id'],results=[],finished=time.time())
+                return
             s.update_job(j['id'], stage='Saving media and latent locally')
             results = []
             for node, out in history.get('outputs', {}).items():
-                for key in ('images','gifs','audio','videos'):
+                for key in ('images','gifs','audio','videos','video'):
                     for item in out.get(key, []):
                         if not isinstance(item, dict) or not item.get('filename'):
                             continue
                         ext = item['filename'].rsplit('.',1)[-1].lower()
-                        if ext not in ('mp4','webm','mov','wav','flac','mp3','ogg'):
+                        if ext not in (('png','jpg','jpeg','webp') if j['kind']=='set-image' else ('mp4','webm','mov','wav','flac','mp3','ogg')):
                             continue
                         target = s.root/'assets'/f'{uid()}.{ext}'
                         c.download({k:item[k] for k in ('filename','subfolder','type') if k in item}, target)
-                        a = self.add_asset(target, j['name'] + (' · driver' if j['kind']=='speech' and ext in ('mp4','webm') else ' · take'), 'generated')
+                        if j.get('workflow')=='h3-cloud-add-guide' and (j.get('guide_source') or j.get('dependency')) and ext in ('mp4','webm','mov'):
+                            trimmed=target.with_name(target.stem+'-trimmed.mp4')
+                            overlap=j['spec']['overlap']
+                            try:
+                                media.normalize_video(target,trimmed,j['spec']['width'],j['spec']['height'],
+                                    (h3_frames(j['spec']['duration'],overlap)-overlap)/24,overlap/24)
+                            finally:target.unlink(missing_ok=True)
+                            target=trimmed
+                        a = self.add_asset(target, j['name'] + (' · driver' if j['kind']=='speech' and ext in ('mp4','webm') else ' · Cloud Add Guide take' if j.get('workflow')=='h3-cloud-add-guide' else ' · take'), 'generated')
                         a['job_id'] = j['id']
+                        a['workflow'] = j.get('workflow','h3-local-motion-context')
                         if a['kind']=='video' and j['kind']=='segment':
-                            overlap=j['spec']['overlap'] if (j.get('context') or j.get('dependency')) else 0
+                            overlap=j['spec']['overlap'] if (j.get('context') or j.get('dependency') or j.get('guide_source')) else 0
                             a['frames']=h3_frames(j['spec']['duration'],overlap)-overlap
                             a['duration']=a['frames']/24
                         if a['kind']=='video' and j['kind']=='speech':
@@ -192,6 +220,7 @@ class JobRunner:
                 ws.close()
 
     def open_ws(self, c, client):
+        if hasattr(c,'key'):return None
         try:
             import websocket
             return websocket.create_connection(c.url.replace('http','ws',1)+'/ws?clientId='+client, timeout=1)
@@ -223,6 +252,16 @@ class JobRunner:
                 continue
             last_poll = time.time()
             try:
+                if j.get('inference')=='cloud':
+                    detail=c.request('/jobs/'+j['prompt_id'],timeout=5)
+                    status=detail.get('status')
+                    if status=='completed':return {'outputs':detail.get('outputs',{})}
+                    if status=='cancelled':
+                        self.store.update_job(j['id'],status='cancelled',stage='Cancelled by Comfy Cloud',finished=time.time())
+                        return None
+                    if status=='failed':raise RuntimeError('Comfy Cloud generation failed: '+str(detail.get('execution_error',{}).get('exception_message','Check workflow and cloud model availability.')))
+                    self.store.update_job(j['id'],stage='Comfy Cloud · '+str(status),connection_error=None)
+                    continue
                 history = c.request('/history/'+j['prompt_id'], timeout=5).get(j['prompt_id'])
                 if self.cancelled(j['id']):
                     return None
@@ -258,6 +297,28 @@ class JobRunner:
         spec = j['spec']
         prefix = 'frameforge/'+j['id']
         schema = c.request('/object_info', timeout=90)
+        if j['kind']=='set-image':
+            from .set_image import image_graph
+            ids=[spec['image_id']]+spec['refs']
+            graph=image_graph(['preflight.png']*len(ids),spec['prompt'],spec['seed'],prefix)
+            validate_graph(graph,schema)
+            images=[c.upload(s.asset_path(snap['assets'][aid])) for aid in ids]
+            return image_graph(images,spec['prompt'],spec['seed'],prefix),None
+        if j['kind']=='splat':
+            from .set_studio import splat_graph
+            graph=splat_graph('preflight.png',j['id'],schema)
+            validate_graph(graph,schema)
+            image=c.upload(s.asset_path(snap['assets'][spec['image_id']]))
+            return splat_graph(image,j['id'],schema),None
+        if j.get('workflow')=='h3-cloud-add-guide':
+            return self.prepare_cloud(j,c,snap,schema)
+        if j.get('inference')=='cloud':
+            # Validate cloud support before uploading any reference media.
+            refs=[{**snap['assets'][aid],'remote':'preflight'} for aid in spec.get('refs',[])]
+            graph=(h3_graph(spec,refs,j['models'],prefix,'preflight' if j.get('context') or j.get('dependency') else None,schema)
+                   if j['kind']=='segment' else encode_graph('preflight',j['models'],prefix))
+            try:validate_graph(graph,schema)
+            except ValueError as e:raise ValueError('Comfy Cloud cannot run this workflow: '+str(e).replace('Install missing ComfyUI nodes:', 'Required nodes unavailable:')) from e
         latent = {'path':prefix+'/latent_00001.safetensors', 'folder':prefix, 'server':c.url,
                   'width':spec.get('width',608), 'height':spec.get('height',352), 'fps':24, 'model':j['models']['h3_model']}
         def upload(aid, normalize=False):
@@ -272,7 +333,7 @@ class JobRunner:
                                       spec.get('trim_in',0) if j['kind']=='encode' else 0)
                 p = target
                 a['has_audio'] = True
-            a['remote'] = c.upload(p)
+            a['remote'] = self.upload_audio_reference(c,a,p,spec,j['id']) if a['kind']=='audio' else c.upload(p)
             return a
         if j['kind']=='segment':
             refs = [upload(aid,True) for aid in spec['refs']]
@@ -298,6 +359,46 @@ class JobRunner:
         a = upload(spec['asset_id'],True)
         return encode_graph(a['remote'],j['models'],prefix), latent
 
+    def upload_audio_reference(self,c,asset,path,spec,jid):
+        trim=spec.get('audio_trims',{}).get(asset['id'])
+        if not trim:return c.upload(path)
+        start,end=float(trim['start']),float(trim['end'])
+        if not 0<=start<end<=asset['duration']:raise ValueError('Audio trim is outside the recording.')
+        target=self.store.root/'assets'/f'audio-trim-{jid}-{asset["id"]}.wav'
+        try:
+            media.trim_audio(path,target,start,end)
+            if self.cancelled(jid):raise ValueError('Cancelled')
+            return c.upload(target)
+        finally:target.unlink(missing_ok=True)
+
+    def prepare_cloud(self,j,c,snap,schema):
+        spec=j['spec'];prefix='frameforge/'+j['id'];source=j.get('guide_source')
+        if j.get('dependency'):
+            dep=next(x for x in snap['jobs'] if x['id']==j['dependency'])
+            videos=[snap['assets'][aid] for aid in dep.get('results',[]) if snap['assets'][aid]['kind']=='video']
+            if dep['status']!='completed' or not videos:raise ValueError('Previous cloud segment did not complete with a video. Retry the chain.')
+            a=videos[-1];source=dict(asset_id=a['id'],trim_in=0,duration=a['duration'])
+        refs=[{**snap['assets'][aid],'remote':'preflight'} for aid in spec['refs']]
+        graph=h3_cloud_graph(spec,refs,j['models'],prefix,'preflight' if source else None,schema)
+        validate_graph(graph,schema)
+        guide=None
+        if source:
+            duration=spec['overlap']/24
+            if source['duration']+0.005<duration:raise ValueError('Continuation source is shorter than the selected overlap.')
+            a=snap['assets'][source['asset_id']]
+            path=self.store.root/'assets'/f'guide-{j["id"]}.mp4'
+            try:
+                media.normalize_video(self.store.asset_path(a),path,spec['width'],spec['height'],duration,
+                                      source.get('trim_in',0)+source['duration']-duration)
+                if self.cancelled(j['id']):raise ValueError('Cancelled')
+                guide=c.upload(path)
+            finally:path.unlink(missing_ok=True)
+        for a in refs:
+            if self.cancelled(j['id']):raise ValueError('Cancelled')
+            path=self.store.asset_path(a)
+            a['remote']=self.upload_audio_reference(c,a,path,spec,j['id']) if a['kind']=='audio' else c.upload(path)
+        return h3_cloud_graph(spec,refs,j['models'],prefix,guide,schema),None
+
     def cancel(self, jid):
         snap = self.store.snapshot()
         j = next(x for x in snap['jobs'] if x['id']==jid)
@@ -307,9 +408,10 @@ class JobRunner:
         self.store.update_job(jid, status='cancelled', stage='Cancelled', finished=time.time())
         if not j.get('prompt_id'):
             return
-        c = Comfy(j['comfy_url'])
         try:
+            c = self.client(j)
             c.request('/queue', {'delete':[j['prompt_id']]}, timeout=3)
+            if j.get('inference')=='cloud':return
             # Interrupt only our own active prompt; never clear another client's queue.
             running = c.request('/queue', timeout=3).get('queue_running',[])
             if any(row[1]==j['prompt_id'] for row in running):

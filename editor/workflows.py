@@ -37,12 +37,15 @@ def save_video(g, key, video, prefix, schema=None):
 def h3_graph(segment, refs, models, prefix, context=None, schema=None):
     g = Graph()
     model = g.add('model', 'UNETLoader', unet_name=models['h3_model'], weight_dtype='default')
+    if segment.get('turbo'):
+        model = g.add('turbo_lora', 'LoraLoaderModelOnly', model=model,
+                      lora_name='minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors', strength_model=1.0)
     clip = g.add('clip', 'CLIPLoader', clip_name=models['h3_clip'], type='stable_diffusion', device='default')
     vae = g.add('vae', 'VAELoader', vae_name=models['h3_video_vae'])
     avae = g.add('avae', 'VAELoader', vae_name=models['h3_audio_vae'])
     inputs = dict(clip=clip, vae=vae, audio_vae=avae, prompt=segment['prompt'],
                   width=segment['width'], height=segment['height'],
-                  length=h3_frames(segment['duration'], segment['overlap'] if context else 0), ref_image_size='match')
+                  length=h3_frames(segment['duration'], segment['overlap'] if context else 0), ref_image_size=segment.get('ref_image_size','match'))
     for kind, limit in [('image', 9), ('video', 3), ('audio', 3)]:
         items = [a for a in refs if a['kind'] == kind]
         if len(items) > limit:
@@ -68,7 +71,7 @@ def h3_graph(segment, refs, models, prefix, context=None, schema=None):
     noise = g.add('noise', 'RandomNoise', noise_seed=segment['seed'])
     guider = g.add('guider', 'BasicGuider', model=model, conditioning=conditioning)
     sampler = g.add('sampler', 'KSamplerSelect', sampler_name='res_multistep')
-    sigmas = g.add('sigmas', 'BasicScheduler', model=model, scheduler='simple', steps=segment['steps'], denoise=1.0)
+    sigmas = g.add('sigmas', 'BasicScheduler', model=model, scheduler='simple', steps=4 if segment.get('turbo') else segment['steps'], denoise=1.0)
     latent = g.add('sample', 'SamplerCustomAdvanced', noise=noise, guider=guider, sampler=sampler, sigmas=sigmas, latent_image=['reference', 1])
     g.add('save_latent', 'MiniMaxH3MotionContextSaveLatent', latent=latent, filename_prefix=prefix + '/latent', clip_index=1)
     video = g.add('decode', 'VAEDecode', samples=latent, vae=vae)
@@ -149,6 +152,13 @@ def validate_graph(graph, schema):
     for key, n in graph.items():
         required = schema[n['class_type']].get('input', {}).get('required', {})
         for name, rule in required.items():
+            if rule[0]=='COMFY_AUTOGROW_V3':
+                template=rule[1]['template'];names=template.get('names',[])
+                values={k:v for k,v in n['inputs'].items() if k.startswith(name+'.')}
+                if len(values)<template.get('min',0):raise ValueError(f'{key}.{name}: not enough inputs')
+                for field,value in values.items():
+                    if (names and field[len(name)+1:] not in names) or not isinstance(value,list) or len(value)!=2 or value[0] not in graph:raise ValueError(f'{key}.{field}: invalid reference connection')
+                continue
             if name not in n['inputs']:
                 raise ValueError(f'{key}: required input {name} is missing')
             value = n['inputs'][name]
@@ -159,3 +169,23 @@ def validate_graph(graph, schema):
             choices = rule[0] if isinstance(rule[0], list) else (rule[1].get('options') if len(rule) > 1 and rule[0] == 'COMBO' else None)
             if choices and value not in choices and n['class_type'] not in ('LoadImage', 'LoadAudio', 'LoadVideo'):
                 raise ValueError(f'{key}.{name}: {value!r} is not installed or supported. Update Settings.')
+
+
+def h3_cloud_graph(segment, refs, models, prefix, guide=None, schema=None):
+    """Native H3 reference generation, optionally pinned to a decoded AV tail.
+
+    Save the full generation; the runner removes the guide prefix locally.
+    No custom Motion Context nodes or server-side latent paths are required.
+    """
+    g=h3_graph(segment,refs,models,prefix,guide,schema)
+    for key in ('previous','context','save_latent','trim'):
+        g.pop(key,None)
+    conditioning=['reference',0]
+    if guide:
+        video=g.add('guide_video','LoadVideo',file=guide)
+        parts=g.add('guide_parts','GetVideoComponents',video=video)
+        conditioning=g.add('guide','MiniMaxH3AddGuide',positive=['reference',0],latent=['reference',1],
+                           frame_idx=0,vae=['vae',0],audio_vae=['avae',0],image=parts,audio=['guide_parts',1])
+    g['guider']['inputs']['conditioning']=conditioning
+    g['video']['inputs'].update(images=['decode',0],audio=['decode_audio',0])
+    return g

@@ -4,6 +4,8 @@ import ipaddress
 import os
 import socket
 import uvicorn
+from pathlib import Path
+from editor.hosting import Hosting, saved_lan
 
 
 def lan_addresses():
@@ -28,13 +30,15 @@ def main():
     binding = parser.add_mutually_exclusive_group()
     binding.add_argument('--host', help='Bind to a specific interface (default: 127.0.0.1)')
     binding.add_argument('--lan', action='store_true', help='Share the editor on your local network')
+    binding.add_argument('--local-only', action='store_true', help='Start with access limited to this computer')
     parser.add_argument('--data', help='Portable library directory')
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error('Port must be between 1 and 65535.')
     if args.data:
         os.environ['FRAMEFORGE_DATA'] = args.data
-    host = '0.0.0.0' if args.lan else (args.host or '127.0.0.1')
+    root = Path(os.environ.get('FRAMEFORGE_DATA', str(Path(__file__).resolve().parent / 'data')))
+    host = args.host or ('0.0.0.0' if args.lan or (not args.local_only and saved_lan(root)) else '127.0.0.1')
     if host == '0.0.0.0':
         print(f'On this computer: http://127.0.0.1:{args.port}', flush=True)
         for address in lan_addresses():
@@ -44,7 +48,10 @@ def main():
     else:
         display_host = f'[{host}]' if ':' in host else host
         print(f'Frameforge: http://{display_host}:{args.port}', flush=True)
-    uvicorn.run('editor.server:app', host=host, port=args.port)
+    from editor.server import app
+    server = uvicorn.Server(uvicorn.Config(app, host=host, port=args.port, proxy_headers=False))
+    app.state.hosting = Hosting(server, root, lan_addresses)
+    server.run()
 
 
 if __name__ == '__main__':

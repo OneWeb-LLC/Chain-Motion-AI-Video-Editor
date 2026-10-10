@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import re
 import shutil
@@ -69,6 +70,19 @@ def waveform(src):
     return [round(max((abs(v) for v in values[i:i+step]), default=0)/32768, 3) for i in range(0, len(values), step)][:180]
 
 
+def export_duration(seg, asset):
+    start=float(seg.get('trim_in',0))
+    available=float(asset['duration'])-start
+    requested=float(seg['duration'])
+    if not all(math.isfinite(x) for x in (start,available,requested)) or start<0 or requested<=0:
+        raise ValueError('Export duration and source in point must be valid positive ranges.')
+    # Probe duration is rounded to hundredths; allow its half-centisecond precision.
+    frames=min(round(requested*24), math.floor((available+.005)*24))
+    if frames<1:
+        raise ValueError(f'{seg["name"]}: no video frames remain after the source in point. Move the in point earlier or select another take.')
+    return frames/24
+
+
 def export_sequence(project, assets, folder, mode):
     folder.mkdir(parents=True, exist_ok=True)
     manifest, clips = [], []
@@ -79,14 +93,12 @@ def export_sequence(project, assets, folder, mode):
             a = assets[seg['main']]
             if a['kind'] != 'video':
                 raise ValueError('Main takes must be videos.')
-            if a['duration'] + 0.05 < seg['duration'] + seg.get('trim_in', 0):
-                raise ValueError(f'{seg["name"]}: source is shorter than its timeline duration. Trim the segment or generate a longer take.')
+            render_duration=export_duration(seg,a)
             name = f'{len(clips)+1:03d}_' + re.sub(r'[^\w-]+', '_', scene['name']+'_'+seg['name'])[:90] + ('.mp4' if mode=='clips' else '.mov')
             output = folder / name
-            render_duration=round(seg['duration']*24)/24
             normalize_video(a['_path'], output, project['width'], project['height'], render_duration, seg.get('trim_in', 0))
             clips.append(output)
-            manifest.append({'scene': scene['name'], 'segment': seg['name'], 'file': name, 'duration': render_duration, 'prompt': seg['prompt'], 'context_frames': seg['overlap']})
+            manifest.append({'scene': scene['name'], 'segment': seg['name'], 'file': name, 'duration': render_duration, 'requested_duration': seg['duration'], 'source_asset': seg['main'], 'source_in': seg.get('trim_in',0), 'prompt': seg['prompt'], 'context_frames': seg['overlap']})
     if not clips:
         raise ValueError('Add segments before exporting.')
     (folder/'manifest.json').write_text(json.dumps(manifest, indent=2))

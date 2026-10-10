@@ -1,0 +1,399 @@
+{
+  "id": "911086ae-0e09-457f-9b42-5412b367d82a",
+  "revision": 0,
+  "last_node_id": 14,
+  "last_link_id": 21,
+  "nodes": [
+    {
+      "id": 5,
+      "type": "VNCCS_SavePLY",
+      "pos": [
+        2890,
+        7570
+      ],
+      "size": [
+        270,
+        180
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "ply_data",
+          "type": "PLY_DATA",
+          "link": 20
+        }
+      ],
+      "outputs": [
+        {
+          "name": "filepath",
+          "type": "STRING",
+          "links": [
+            17
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "vnccs",
+        "ver": "87443c3eda651317f39a8be7fd40a1c868565134",
+        "Node name for S&R": "VNCCS_SavePLY"
+      },
+      "widgets_values": [
+        "output"
+      ],
+      "widgets_values_named": {
+        "filename": "output"
+      }
+    },
+    {
+      "id": 6,
+      "type": "VNCCS_LoadWorldMirrorV2Model",
+      "pos": [
+        1754.6225244697923,
+        7449.0933199995125
+      ],
+      "size": [
+        310,
+        114
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "WORLDMIRROR_MODEL",
+          "links": [
+            19
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-hyworld2",
+        "ver": "a80b011c5a1af0e0f358659c7446822d43cb7d05",
+        "Node name for S&R": "VNCCS_LoadWorldMirrorV2Model"
+      },
+      "widgets_values": [
+        "cuda",
+        "fp8"
+      ],
+      "widgets_values_named": {
+        "device": "cuda",
+        "precision": "fp8"
+      }
+    },
+    {
+      "id": 12,
+      "type": "VNCCS_BackgroundPreview",
+      "pos": [
+        2870,
+        7840
+      ],
+      "size": [
+        520,
+        704
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "ply_path",
+          "shape": 7,
+          "type": "STRING",
+          "link": 17
+        },
+        {
+          "name": "camera_poses",
+          "shape": 7,
+          "type": "TENSOR",
+          "link": null
+        },
+        {
+          "name": "camera_intrinsics",
+          "shape": 7,
+          "type": "TENSOR",
+          "link": null
+        },
+        {
+          "name": "extrinsics",
+          "shape": 7,
+          "type": "EXTRINSICS",
+          "link": null
+        },
+        {
+          "name": "intrinsics",
+          "shape": 7,
+          "type": "INTRINSICS",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "video_path",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "name": "ply_path",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-hyworld2",
+        "ver": "a80b011c5a1af0e0f358659c7446822d43cb7d05",
+        "Node name for S&R": "VNCCS_BackgroundPreview",
+        "coordinate_basis": "auto"
+      },
+      "widgets_values": [
+        "auto",
+        ""
+      ],
+      "widgets_values_named": {
+        "coordinate_basis": "auto",
+        "preview_gaussian": ""
+      }
+    },
+    {
+      "id": 8,
+      "type": "LoadImage",
+      "pos": [
+        1130,
+        7340
+      ],
+      "size": [
+        290,
+        350
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            21
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "title": "Load Panorama",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.17.0",
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "1333741.png",
+        "image"
+      ],
+      "widgets_values_named": {
+        "image": "1333741.png",
+        "upload": "image"
+      }
+    },
+    {
+      "id": 14,
+      "type": "VNCCS_WorldMirrorV2_3D",
+      "pos": [
+        2171.5897934332957,
+        7658.279963358787
+      ],
+      "size": [
+        379.26666259765625,
+        722
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "WORLDMIRROR_MODEL",
+          "link": 19
+        },
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 21
+        },
+        {
+          "name": "camera_intrinsics",
+          "shape": 7,
+          "type": "TENSOR",
+          "link": null
+        },
+        {
+          "name": "camera_poses",
+          "shape": 7,
+          "type": "TENSOR",
+          "link": null
+        },
+        {
+          "name": "depth_prior",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "ply_data",
+          "type": "PLY_DATA",
+          "links": [
+            20
+          ]
+        },
+        {
+          "name": "depth_maps",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "name": "normal_maps",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "name": "camera_poses",
+          "type": "TENSOR",
+          "links": null
+        },
+        {
+          "name": "camera_intrinsics",
+          "type": "TENSOR",
+          "links": null
+        },
+        {
+          "name": "raw_splats",
+          "type": "VNCCS_SPLAT",
+          "links": null
+        },
+        {
+          "name": "filter_mask",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "name": "gs_filter_mask",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-hyworld2",
+        "ver": "a80b011c5a1af0e0f358659c7446822d43cb7d05",
+        "Node name for S&R": "VNCCS_WorldMirrorV2_3D"
+      },
+      "widgets_values": [
+        518,
+        "none",
+        false,
+        false,
+        false,
+        true,
+        0.003,
+        "depth_adaptive",
+        1,
+        3,
+        true,
+        0.0015,
+        9000000,
+        1.75,
+        "camera_inputs"
+      ],
+      "widgets_values_named": {
+        "target_size": 518,
+        "offload_scheme": "none",
+        "low_vram_mode": false,
+        "apply_sky_mask": false,
+        "debug_log": false,
+        "enable_splat_upsample": true,
+        "splat_upsample_scale": 0.003,
+        "splat_upsample_scale_mode": "depth_adaptive",
+        "splat_upsample_depth_scale_strength": 1,
+        "splat_upsample_depth_scale_max": 3,
+        "splat_upsample_voxel_prune": true,
+        "splat_upsample_voxel_size": 0.0015,
+        "splat_upsample_max_points": 9000000,
+        "splat_upsample_cap_far_bias": 1.75,
+        "splat_camera_source": "camera_inputs"
+      }
+    }
+  ],
+  "links": [
+    [
+      17,
+      5,
+      0,
+      12,
+      0,
+      "STRING"
+    ],
+    [
+      19,
+      6,
+      0,
+      14,
+      0,
+      "WORLDMIRROR_MODEL"
+    ],
+    [
+      20,
+      14,
+      0,
+      5,
+      0,
+      "PLY_DATA"
+    ],
+    [
+      21,
+      8,
+      0,
+      14,
+      1,
+      "IMAGE"
+    ]
+  ],
+  "groups": [
+    {
+      "id": 2,
+      "title": "HY-World2.0",
+      "bounding": [
+        1840,
+        7470,
+        2200,
+        1073.599999999999
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    }
+  ],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.46767918141383386,
+      "offset": [
+        -916.9311632669026,
+        -7048.9312200075665
+      ]
+    },
+    "frontendVersion": "1.52.7",
+    "VHS_latentpreview": false,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true,
+    "anomalous_hashes": {}
+  },
+  "version": 0.4,
+  "seed_widgets": {}
+}

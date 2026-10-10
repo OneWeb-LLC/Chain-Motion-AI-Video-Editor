@@ -1,3 +1,5 @@
+import json
+import copy
 import tempfile
 import unittest
 import zipfile
@@ -36,10 +38,30 @@ class MediaTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'Choose a main video'):
                 media.export_sequence(p,{},Path(tmp),'video')
 
-    def test_short_media_fails_before_export(self):
+    def test_shorter_previous_take_exports_both_modes(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p={'scenes':[{'name':'Scene','segments':[{'name':'Shot','main':'a','duration':4,'trim_in':1}]}]}
-            with self.assertRaisesRegex(ValueError,'shorter'):
-                media.export_sequence(p,{'a':{'kind':'video','duration':4}},Path(tmp),'video')
+            root=Path(tmp);source=root/'source.mp4'
+            media.run(['-f','lavfi','-i','testsrc2=size=160x96:rate=24','-t','1','-an','-c:v','libx264',source])
+            seg=dict(name='Earlier take',main='a',duration=4,trim_in=.25,prompt='test',overlap=22)
+            p=dict(width=160,height=96,scenes=[dict(name='Scene',segments=[seg])])
+            before=copy.deepcopy(p)
+            for mode in ['video','clips']:
+                result=media.export_sequence(p,{'a':dict(kind='video',duration=1,_path=str(source))},root/mode,mode)
+                manifest=json.loads((root/mode/'manifest.json').read_text())
+                self.assertEqual(manifest[0]['duration'],.75)
+                self.assertEqual(manifest[0]['requested_duration'],4)
+                if mode=='video':self.assertAlmostEqual(media.probe(result)['duration'],.75,places=2)
+                else:
+                    with zipfile.ZipFile(result) as archive:
+                        archive.extract(manifest[0]['file'],root/'check')
+                    self.assertAlmostEqual(media.probe(root/'check'/manifest[0]['file'])['duration'],.75,places=2)
+            self.assertEqual(p,before)
+
+    def test_export_still_honors_shorter_timeline_trim(self):
+        self.assertEqual(media.export_duration(dict(name='shot',duration=2,trim_in=1),dict(duration=5)),2)
+
+    def test_export_rejects_in_point_beyond_source(self):
+        with self.assertRaisesRegex(ValueError,'no video frames'):
+            media.export_duration(dict(name='shot',duration=4,trim_in=5),dict(duration=4))
 
 if __name__=='__main__':unittest.main()

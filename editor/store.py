@@ -14,7 +14,38 @@ def uid():
 
 def segment(name='Segment 01'):
     return dict(id=uid(), name=name, prompt='', duration=3.5, overlap=22, connected=False,
-                refs=[], main=None, takes=[], trim_in=0, seed=42, steps=20, width=608, height=352, continuation=None)
+                refs=[], main=None, takes=[], trim_in=0, seed=42, randomize_seed=True, steps=20, ref_image_size='match', width=608, height=352, continuation=None)
+
+
+def continuation_sources(p):
+    entries = [(scene, seg) for scene in p['scenes'] for seg in scene['segments']]
+    by_id = {seg['id']: seg for _, seg in entries}
+    sources = {}
+    for i, (_, seg) in enumerate(entries):
+        source = seg.get('continuation_segment')
+        if source and source not in by_id:
+            raise ValueError(f'{seg["name"]}: linked continuation segment is missing.')
+        if seg.get('type') == 'video' or seg.get('continuation'):
+            continue
+        if source:
+            sources[seg['id']] = by_id[source]
+        elif seg.get('connected') and i:
+            sources[seg['id']] = entries[i-1][1]
+    return entries, sources
+
+
+def generation_order(p):
+    entries, sources = continuation_sources(p)
+    by_id = {seg['id']: (scene, seg) for scene, seg in entries}
+    ordered, visiting, visited = [], set(), set()
+    def visit(sid):
+        if sid in visiting:raise ValueError('Motion continuation links form a cycle. Unlink one segment before saving or queuing.')
+        if sid in visited:return
+        visiting.add(sid)
+        if sid in sources:visit(sources[sid]['id'])
+        visiting.remove(sid);visited.add(sid);ordered.append(by_id[sid])
+    for _, seg in entries:visit(seg['id'])
+    return ordered, sources
 
 
 def segment_source(seg):
@@ -57,7 +88,31 @@ def project(name='Untitled film'):
                 scenes=[dict(id=uid(), name='Scene 01', prompt='', refs=[], segments=[segment()])])
 
 
+def migrate_writer_references(p):
+    changed=False
+    for sc in p.get('scenes',[]):
+        writer=sc.get('writer')
+        if not writer or writer.get('reference_mode')=='segment':
+            continue
+        for seg in sc['segments']:
+            seg['refs']=list(dict.fromkeys(sc.get('refs',[])+seg.get('refs',[])))
+        sc['refs']=[]
+        writer['reference_mode']='segment'
+        changed=True
+    return changed
+
+
+def ordered_references(scene,seg):
+    ids=list(dict.fromkeys(scene.get('refs',[])+seg.get('refs',[])))
+    order=seg.get('ref_order',[])
+    if not isinstance(order,list) or any(not isinstance(a,str) for a in order):
+        raise ValueError('Invalid reference order.')
+    return list(dict.fromkeys([a for a in order if a in ids]+ids))
+
+
 def check_project(p, assets):
+    generation_order(p)
+    migrate_writer_references(p)
     if not isinstance(p.get('name'), str) or not p['name'].strip():
         raise ValueError('Give your project a name.')
     if p.get('fps') != 24:
@@ -71,12 +126,25 @@ def check_project(p, assets):
                 raise ValueError('Scene and segment IDs must be unique.')
             ids.add(obj['id'])
         for s in scene['segments']:
+            ordered_references(scene,s)
             if not 0.25 <= float(s['duration']) <= (86400 if s.get('type')=='video' else 120) or s['overlap'] not in [22, 39, 56]:
                 raise ValueError('Duration must be at least 0.25 seconds (maximum 120 for generated segments or 86400 for imported videos); overlap must be 22, 39 or 56 frames.')
+            if s.get('ref_image_size','match') not in ('match','max'):
+                raise ValueError('Image reference size must be match or max.')
             if not 1 <= int(s['steps']) <= 100 or not 0 <= int(s['seed']) <= 2**53-1:
                 raise ValueError('Steps must be 1–100 and seed a nonnegative safe integer.')
             if not 0 <= float(s.get('trim_in', 0)) <= 86400:
                 raise ValueError('Trim start must be nonnegative.')
+            trims=s.get('audio_trims',{})
+            if not isinstance(trims,dict):raise ValueError('Audio trims must be a mapping.')
+            for aid,trim in trims.items():
+                # Removed references may retain their trim for later reuse.
+                if aid not in scene['refs']+s['refs']:continue
+                a=assets.get(aid,{})
+                if a.get('kind')!='audio' or not isinstance(trim,dict):raise ValueError('Audio trim requires an audio reference.')
+                try:valid=0<=float(trim['start'])<float(trim['end'])<=float(a['duration'])
+                except (KeyError,TypeError,ValueError):valid=False
+                if not valid:raise ValueError('Choose audio trim in/out points within the recording.')
             for kind, limit in [('image',9),('video',3),('audio',3)]:
                 refs = set(scene['refs'] + s['refs'])
                 if any(a not in assets for a in refs):
@@ -102,6 +170,10 @@ class Store:
             p = project()
             self.data = dict(projects={p['id']:p}, assets={}, jobs=[], settings=dict(comfy_url='http://192.168.88.253:8188', models=DEFAULT_MODELS.copy()))
             self.save()
+        for p in self.data['projects'].values():
+            if migrate_writer_references(p):
+                p['version']+=1
+        self.data.setdefault('saved_projects', copy.deepcopy(self.data['projects']))
         # Never re-submit a prompt after a crash. Resume history monitoring if possible.
         for j in self.data['jobs']:
             if j['status'] in ('preparing','running','cancelling','submitting'):

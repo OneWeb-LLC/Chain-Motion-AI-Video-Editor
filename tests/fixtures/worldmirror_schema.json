@@ -1,0 +1,513 @@
+{
+  "VNCCS_SavePLY": {
+    "input": {
+      "required": {
+        "ply_data": [
+          "PLY_DATA"
+        ],
+        "filename": [
+          "STRING",
+          {
+            "default": "output"
+          }
+        ]
+      }
+    }
+  },
+  "VNCCS_LoadWorldMirrorV2Model": {
+    "input": {
+      "optional": {
+        "device": [
+          [
+            "cuda",
+            "cpu"
+          ],
+          {
+            "default": "cuda"
+          }
+        ],
+        "precision": [
+          [
+            "bf16",
+            "fp8",
+            "float32"
+          ],
+          {
+            "default": "bf16",
+            "tooltip": "bf16: recommended, ~2\u00d7 VRAM vs float32. fp8: weight-only quantization via torchao, ~2\u00d7 vs bf16 (requires torchao, Ampere+). float32: full precision."
+          }
+        ]
+      }
+    }
+  },
+  "VNCCS_BackgroundPreview": {
+    "input": {
+      "required": {},
+      "optional": {
+        "ply_path": [
+          "STRING",
+          {
+            "forceInput": true,
+            "tooltip": "Path to a Gaussian Splatting PLY file"
+          }
+        ],
+        "camera_poses": [
+          "TENSOR",
+          {
+            "tooltip": "Optional: camera poses tensor from WorldMirror V2. Used to initialize the viewer camera."
+          }
+        ],
+        "camera_intrinsics": [
+          "TENSOR",
+          {
+            "tooltip": "Optional: camera intrinsics tensor from WorldMirror V2. Used for viewer FOV."
+          }
+        ],
+        "coordinate_basis": [
+          [
+            "auto",
+            "worldmirror",
+            "hyworld2_worldgen"
+          ],
+          {
+            "default": "auto",
+            "tooltip": "Coordinate basis of the PLY/camera tensors. Use hyworld2_worldgen for official HYWorld2 trainer outputs."
+          }
+        ]
+      }
+    }
+  },
+  "LoadImage": {
+    "input": {
+      "required": {
+        "image": [
+          [
+            "6aaf5b3626d4eab3132cd43eaddc491bb43fc3ec0ff29165976731772f.webp",
+            "ComfyUI_00406_.jpg",
+            "ComfyUI_00466_(1).jpg",
+            "ComfyUI_temp_plyfp_00001_.png",
+            "ElevenLabs_video_gemini-omni-flash_remove the on-s_2026-07-25T13_05_50.jpg",
+            "Firered_image_edit_1.1_00268_.png",
+            "Firered_image_edit_1.1_00361_.png",
+            "Flux2-Klein_00141_.png",
+            "Krea2_turbo_00197_.png",
+            "Krea2_turbo_00356_(1).png",
+            "Krea2_turbo_00356_.png",
+            "Krea2_turbo_00385_.png",
+            "Krea2_turbo_00392_.png",
+            "Krea2_turbo_00397_.png",
+            "Krea2_turbo_00401_.png",
+            "Krea2_turbo_00413_.png",
+            "Krea2_turbo_00414_.png",
+            "Krea2_turbo_00422_.png",
+            "Krea2_turbo_00425_.png",
+            "Krea2_turbo_00478_.png",
+            "Krea2_turbo_00509_.png",
+            "Krea2_turbo_00515_.png",
+            "Krea2_turbo_00524_.png",
+            "Krea2_turbo_00558_.png",
+            "Krea2_turbo_00575_.png",
+            "Krea2_turbo_00583_.png",
+            "Krea2_turbo_00596_.png",
+            "Krea2_turbo_00601_.png",
+            "Krea2_turbo_00611_.png",
+            "MiniMax_H3_00170_.jpg",
+            "MiniMax_H3_00181_.jpg",
+            "MiniMax_H3_00190_.jpg",
+            "MiniMax_H3_00246__Precise_Starlight_2_5.jpg",
+            "MiniMax_H3_00299_ (1).jpg",
+            "MiniMax_H3_00299_.jpg",
+            "MiniMax_H3_00354_.jpg",
+            "MiniMax_H3_00374_.jpg",
+            "MiniMax_H3_00378_.jpg",
+            "MiniMax_H3_00416__ast2_C1S2.jpg",
+            "MiniMax_H3_004trt86_.jpg",
+            "MiniMax_H3_00514_.jpg",
+            "MiniMax_H3_00520_.jpg",
+            "MiniMax_H3_00582_.jpg",
+            "MiniMax_H3_00780_.jpg",
+            "MiniMax_H3_00801_.jpg",
+            "MiniMax_H3_00806_.jpg",
+            "MiniMax_H3_00820_(1).jpg",
+            "MiniMax_H3_00833_.jpg",
+            "MiniMax_H3_00919_.jpg",
+            "MiniMax_H3_00927_.jpg",
+            "MiniMax_H3_00929_.jpg",
+            "MiniMax_H3_00953_.jpg",
+            "MiniMax_H3_01075__ast2_C1S1(1).jpg",
+            "MiniMax_H3_01325_.jpg",
+            "MiniMax_H3_01325_3.jpg",
+            "MiniMax_H3_01325_6.jpg",
+            "MiniMax_H3_01382_.jpg",
+            "MiniMax_H3_01649_.jpg",
+            "MiniMax_H3_g00780_.jpg",
+            "Qwen_Edit_2511_00001_.png",
+            "Qwen_Edit_2511_00041_.png",
+            "Qwen_Edit_2511_00054_.png",
+            "Qwen_Edit_2511_00057_.png",
+            "Qwen_image_2.1_00001.png",
+            "Qwen_image_2.1_00053.png",
+            "Qwen_image_2.1_00097.png",
+            "Qwen_imtrage_2.1_00001.png",
+            "Segment 07 \u00b7 frame 0(1).png",
+            "Shot 06 copy copy \u00b7 frame 3.png",
+            "Shot 06 \u00b7 frame 201.png",
+            "Throg.jpeg",
+            "Untitled.png",
+            "antagonist_.png",
+            "beer.png",
+            "clip1.jpg",
+            "clip1vert.jpg",
+            "clip3vert.jpg",
+            "clipspace-mask-1789019888731.png",
+            "clipspace-paint-1789019888731.png",
+            "clipspace-painted-1789019888731.png",
+            "clipspace-painted-masked-1789019888731.png",
+            "dcd0abbc-ec36-42d6-a15b-e3e012d419a5.png",
+            "e522424b-030d-4a2f-b3ef-4a77f7a8a34e.png",
+            "fifgdle.png",
+            "filde.png",
+            "filsde.png",
+            "filswe.png",
+            "glo-feature-text-with-image.webp",
+            "herorcclose.png",
+            "jesus-in-memes-he-really-shouldnt-be-in-v0-8bxe1tabczih1.webp",
+            "kae.png",
+            "kaesuit.png",
+            "leon-kennedy-meeting-teemo-from-lol-in-a-dark-foggy-forest-v0-u83bfiukoojh1.webp",
+            "magnific_0eDHkjZTfW.png",
+            "magnific_1lLWpvEr4r.png",
+            "magnific_1lgFBWqr4r.png",
+            "magnific_MBIGchGDCm.png",
+            "magnific_MBIGchGDCpathm.png",
+            "magnific_a-close-up-of-the-referen_1sKbm9fr4r.png",
+            "magnific_a-distant-gods-eye-view-o_fHQb2ZNCDY(1).png",
+            "magnific_a-first-person-cockpit-vi_Sy9XWo4Ub8.png",
+            "magnific_a-homemade-breakfast-on-a_cpeueHM0eP (1).png",
+            "magnific_a-homemade-breakfast-on-a_cpeueHM0eP.png",
+            "magnific_a-park-with-a-walking-pat_Bhv1MdAoQR.png",
+            "magnific_a-pristine-sandy-beach-wi_9R433KZNYZ.png",
+            "magnific_a-profile-view-framing-a-_e8MAsO3dqL.png",
+            "magnific_a-wide-angle-profile-few-_SOlsh0GUb8.png",
+            "magnific_a-wide-low-angle-profile-_brHFDmX5Y2.png",
+            "magnific_a-wide-low-angle-profile-_cDYnJBY0eP.png",
+            "magnific_add-a-34-close-up-view-of_jUPNeXJLD0.png",
+            "magnific_add-a-harness-to-the-pilo_vuhAoOLa47.png",
+            "magnific_add-a-left-gloved-hand-fl_dta3waeXSL.png",
+            "magnific_add-a-left-gloved-hand-pu_xSJKDtPjfW.png",
+            "magnific_add-a-very-short-extremel_xSUikspjfW.png",
+            "magnific_add-a-very-shot-needle-at_SyPGoTBUb8.png",
+            "magnific_add-the-scenery-to-the-co_WDXvdtscXe.png",
+            "magnific_add-the-scenery-to-the-co_rg76wQrxtc.png",
+            "magnific_an-close-up-of-the-round-_YMdvtPoWeC(1).png",
+            "magnific_an-extreme-close-up-of-th_iAN9Ese3uK.png",
+            "magnific_an-extreme-close-up-of-th_iGWVpgk3uK.png",
+            "magnific_an-extreme-close-up-of-th_s7S8TY4l8e(1).png",
+            "magnific_blackandwhite-previsualiz_KLscCewkqp.png",
+            "magnific_change-the-building-in-th_xSwilI0jfW.png",
+            "magnific_change-the-hologram-in-fr_xS78sxOjfW.png",
+            "magnific_change-the-pose-to-the-pr_Ia8QoxjtvE.png",
+            "magnific_change-the-pose-to-the-pr_gJl9LRHSXO.png",
+            "magnific_change-the-sky-to-a-night_nVdkz49YQD.png",
+            "magnific_convert-this-digital-pain_iGYvQUk3uK.png",
+            "magnific_convert-this-to-black-and_LwSHYvUswO.png",
+            "magnific_create-a-black-white-simp_rgwEjQoxtc.png",
+            "magnific_create-a-closeup-34-varia_Xm8DliWBfo.png",
+            "magnific_create-a-female-version-o_tCvBki4mZJ (1).png",
+            "magnific_create-a-female-version-o_tCvBki4mZJ.png",
+            "magnific_create-a-variant-of-this-_tfIRgDSmZJ.png",
+            "magnific_create-a-variant-of-this-_xg1qLiWjfW (1).png",
+            "magnific_create-a-variant-of-this-_xg1qLiWjfW.png",
+            "magnific_create-an-close-up-over-t_EbqGR3ouuO.png",
+            "magnific_create-an-medium-close-up_ovhEB51829.png",
+            "magnific_create-da-variant-of-this-_xg1qLiWjfW.png",
+            "magnific_create-heavily-damaged-wr_p8XDSzkehw.png",
+            "magnific_edit-only-the-image-displ_6AW2qkaiJO.png",
+            "magnific_edit-only-the-image-displ_bxgrzxr5Y2.png",
+            "magnific_fHHBd2hCDY.png",
+            "magnific_fHqlHOtCDY.png",
+            "magnific_firstperson-view-from-the_MBmox9dDCm.png",
+            "magnific_fix-the-knight-character-_huu7f9UvqL(1).png",
+            "magnific_fix-the-second-simple-rou_swL9BTPl8e.png",
+            "magnific_high-angle-view-of-the-mo_BhI4Xc0oQR(1).png",
+            "magnific_high-angle-view-of-the-mo_BhI4Xc0oQR.png",
+            "magnific_isolate-the-axe-on-a-plai_vQLdzsga47.png",
+            "magnific_isolate-the-character-on-_vQF9nKfa47.png",
+            "magnific_isolate-the-hover-craft-o_tCFuTXgmZJ.png",
+            "magnific_jUg03dfLD0.png",
+            "magnific_remove-the-background-sce_nVp41D3YQD(1).jpg",
+            "magnific_remove-the-background-sce_nVp41D3YQD.jpg",
+            "magnific_remove-the-can-and-hand-f_N22xbbi6D9.png",
+            "magnific_remove-the-can-and-hand-f_dttnEwWXSL.png",
+            "magnific_remove-the-can-and-hand-f_ovvcHmJ829.png",
+            "magnific_remove-the-can-from-the-s_N22rz7j6D9.png",
+            "magnific_remove-the-character-from_nVMD3XGYQD.png",
+            "magnific_remove-the-characters-fro_lJ742Rvgv9.png",
+            "magnific_remove-the-glowing-sphere_w4yBuo37EI.png",
+            "magnific_remove-the-hat-from-the-r_bxjQS2p5Y2.png",
+            "magnific_remove-the-helicopters-fr_KLgBUq9kqp.png",
+            "magnific_remove-the-helmet_3zAELZ6REY.png",
+            "magnific_remove-the-hovercraft-fro_bxlLhsf5Y2.png",
+            "magnific_remove-the-left-front-pil_ksLMVXi16B.png",
+            "magnific_remove-the-missile-from-t_lJ9FWGLgv9.png",
+            "magnific_remove-the-missiles-from-_vQKq7sha47.png",
+            "magnific_remove-the-monument-from-_JN2yYKcOq4.png",
+            "magnific_remove-the-monument-insid_aFHXS2KfSh.png",
+            "magnific_remove-the-outdoor-scener_VX8xiVpMMU.png",
+            "magnific_remove-the-pilots-and-the_6AnZxOqiJO.png",
+            "magnific_remove-the-search-lights-_LwJygHFswO.png",
+            "magnific_remove-the-search-lights-_s7JrE6jl8e.png",
+            "magnific_remove-the-space-craft-fr_VX8eRWsMMU.png",
+            "magnific_remove-the-tail-rotor-fai_P3An9s142C.png",
+            "magnific_remove-the-text-and-place_kL5bvXM16B.png",
+            "magnific_replace-the-central-image_w44kauQ7EI(1).png",
+            "magnific_replace-the-character-wit_rgsuqsgxtc.png",
+            "magnific_replace-the-middle-image-_0eeZXvQTfW.png",
+            "magnific_replace-the-middle-image-_Syy5vNQUb8.png",
+            "magnific_replace-the-middle-image-_bxxhurA5Y2.png",
+            "magnific_replace-the-middle-image-_cppiGdK0eP.png",
+            "magnific_replace-the-middle-image-_mEEpFNrhJQ.png",
+            "magnific_replace-the-needle-in-the_lJOy5dGgv9.png",
+            "magnific_replace-the-perfume-with-_iGGKjl13uK.png",
+            "magnific_replace-the-perfume-with-_lJJmaNvgv9.png",
+            "magnific_replace-the-pilot-in-the-_1l7V7bZr4r.png",
+            "magnific_replace-the-pilot-in-the-_Cq1ZL4DEEy.png",
+            "magnific_replace-the-pilot-with-th_8aC4eVgIrU(1).png",
+            "magnific_replace-the-pilot-with-th_w4NcYkf7EI.png",
+            "magnific_restyle-as-a-photo-real-3_wPUf3F97EI.png",
+            "magnific_restyle-the-characters-as_ohBtVVo829.png",
+            "magnific_restyle-the-characters-as_vuhCX9Da47.png",
+            "magnific_restyle-this-image-a-phot_fHqNm9UCDY.png",
+            "magnific_scene-start-style-cinemat_1s5vGCnr4r.jpg",
+            "magnific_setting-purplelit-stone-s_62NlLuAiJO.jpg",
+            "magnific_setting-purplelit-stone-s_fFaVFBhCDY(1).jpg",
+            "magnific_style-2d-basic-black-and-_LwSHWZWswO.png",
+            "magnific_style-2d-basic-black-and-_bx1vRBp5Y2.png",
+            "magnific_style-2d-basic-black-and-_w4y1Dx67EI.png",
+            "magnific_swap-the-3d-character-clo_gJlNaPsSXO.png",
+            "magnific_swap-the-3d-character-for_ohBu5RO829(1).jpg",
+            "magnific_swap-the-3d-character-for_ohBu5RO829.jpg",
+            "magnific_swap-the-background-for-a_1skJYk5r4r.png",
+            "magnific_swap-the-background-for-a_Ia8qPIOtvE.png",
+            "magnific_swap-the-background-for-a_Kj5UKnekqp.png",
+            "magnific_swap-the-background-for-a_LUjPH5jswO.png",
+            "magnific_swap-the-background-for-a_aQvKDRqfSh.png",
+            "magnific_swap-the-background-for-a_cDW8jBE0eP.png",
+            "magnific_swap-the-background-for-a_hEmKw1AvqL(1).png",
+            "magnific_swap-the-background-for-a_ohBuZFi829.png",
+            "magnific_swap-the-background-for-a_tfIbJEFmZJ.png",
+            "magnific_swap-the-background-for-a_xgrPnGcjfW.png",
+            "magnific_swap-the-background-for-t_vuh5C40a47(1).png",
+            "magnific_the-character-is-wielding_N2DuS806D9.png",
+            "magnific_the-craft-is-firing-a-sin_IaoeiVotvE.png",
+            "magnific_the-mans-right-hand-is-gr_dthqSiaXSL.png",
+            "magnific_the-referenced-damaged-ho_bxgf0JF5Y2.png",
+            "magnific_the-ruins-are-in-the-midd_ks9J86Z16B.png",
+            "magnific_turn-the-camera-to-a-dist_rlKIQBZxtc.png",
+            "magnific_turn-the-camera-to-create_rlkkzFextc(1).png",
+            "magnific_wideangle-cinematic-front_P32LoV842C.png",
+            "magnific_wideangle-cinematic-front_dtvnzqpXSL.png",
+            "magnific_wideangle-profile-shot-of_ksSf6Fl16B.png",
+            "magnific_zoom-in-to-create-a-close_TdCWmZ8VNR(1)(1).png",
+            "magnific_zoom-the-camera-to-a-clos_CHv0ZlYEEy.png",
+            "magnific_zoom-the-camera-to-a-clos_jS1fmrjLD0.png",
+            "orcheroine.png",
+            "protag.png",
+            "raccoon-city-or-something-else-v0-iidkwuvu67zf1.webp",
+            "reference-img3.jpeg",
+            "skillissue.png",
+            "storyforge_169b1840-802f-41bb-bb46-909b58829eaa.png",
+            "storyforge_1dc34306-b74a-4396-a63c-35f3979436ac.png",
+            "storyforge_26a222d2-6df8-46d5-8b3c-91e68c461aba.jpg",
+            "storyforge_2fb09568-be36-4361-ada0-cbd06c47b2f5.png",
+            "storyforge_3af6b22c-4293-4f50-8b23-f7b78eeb5594.png",
+            "storyforge_3ea9435b-3dbe-4f86-862d-0067e46fd180.png",
+            "storyforge_41ac2772-24bb-4985-b367-582112c0c416.jpg",
+            "storyforge_6ee1ba93-2dee-4f49-9d99-034716fe57c1.png",
+            "storyforge_76c40b2a-bc7a-476a-9b5d-88b3a2cc7e4d.png",
+            "storyforge_8e2ddb1f-a2cb-4d09-8ebc-2ebd828da7af.png",
+            "storyforge_9e230fdc-e9a8-40b4-9b90-1a946567692b.png",
+            "storyforge_a8148fd7-4059-4c09-9496-81e41a598a89.png",
+            "storyforge_cf346838-2d46-4133-bed4-4a025ad458f7.jpg",
+            "storyforge_e907b855-55ae-473e-823b-4d8c1ab5fc9a.png",
+            "storyforge_e9c1882e-f1c3-4519-ba88-b20523ebdead.png",
+            "storyforge_edcda67e-8711-445a-ac9a-6c92110700d7.png",
+            "video-frame-6.44s.png"
+          ],
+          {
+            "image_upload": true
+          }
+        ]
+      }
+    }
+  },
+  "VNCCS_WorldMirrorV2_3D": {
+    "input": {
+      "required": {
+        "model": [
+          "WORLDMIRROR_MODEL"
+        ],
+        "images": [
+          "IMAGE"
+        ]
+      },
+      "optional": {
+        "target_size": [
+          "INT",
+          {
+            "default": 518,
+            "min": 252,
+            "max": 4096,
+            "step": 14,
+            "tooltip": "Model inference resolution. Experimental high values are VRAM-heavy; dense splats can be upsampled separately."
+          }
+        ],
+        "offload_scheme": [
+          [
+            "none",
+            "model_cpu_offload"
+          ],
+          {
+            "default": "none",
+            "tooltip": "Move model weights to CPU between GPU use to reduce VRAM at the cost of speed."
+          }
+        ],
+        "low_vram_mode": [
+          "BOOLEAN",
+          {
+            "default": true,
+            "tooltip": "Apply the low-VRAM profile: depth_only, frame chunks=1, GS param chunks=1, transformer MLP chunks=8192."
+          }
+        ],
+        "apply_sky_mask": [
+          "BOOLEAN",
+          {
+            "default": false,
+            "tooltip": "Remove sky-like regions before saving. Useful for outdoor panoramas where sky can create far/infinite splats."
+          }
+        ],
+        "debug_log": [
+          "BOOLEAN",
+          {
+            "default": false,
+            "tooltip": "Print camera/depth/splat alignment diagnostics to the ComfyUI console."
+          }
+        ],
+        "enable_splat_upsample": [
+          "BOOLEAN",
+          {
+            "default": true,
+            "tooltip": "Build dense high-resolution splats from depth. Disable when only depth maps are needed."
+          }
+        ],
+        "splat_upsample_scale": [
+          "FLOAT",
+          {
+            "default": 0.003,
+            "min": 0.0001,
+            "max": 0.05,
+            "step": 0.0001,
+            "tooltip": "Gaussian size for dense backprojected splats."
+          }
+        ],
+        "splat_upsample_scale_mode": [
+          [
+            "constant",
+            "depth_adaptive",
+            "footprint_adaptive",
+            "hybrid_adaptive"
+          ],
+          {
+            "default": "depth_adaptive",
+            "tooltip": "constant uses one Gaussian size; depth_adaptive grows with depth; footprint_adaptive follows local 3D spacing; hybrid uses both."
+          }
+        ],
+        "splat_upsample_depth_scale_strength": [
+          "FLOAT",
+          {
+            "default": 1.0,
+            "min": 0.0,
+            "max": 8.0,
+            "step": 0.05,
+            "tooltip": "Depth growth strength, or local footprint multiplier in footprint/hybrid modes."
+          }
+        ],
+        "splat_upsample_depth_scale_max": [
+          "FLOAT",
+          {
+            "default": 3.0,
+            "min": 1.0,
+            "max": 12.0,
+            "step": 0.1,
+            "tooltip": "Maximum multiplier over splat_upsample_scale for adaptive modes."
+          }
+        ],
+        "splat_upsample_voxel_prune": [
+          "BOOLEAN",
+          {
+            "default": true,
+            "tooltip": "Voxel-merge dense splats to reduce file size."
+          }
+        ],
+        "splat_upsample_voxel_size": [
+          "FLOAT",
+          {
+            "default": 0.0015,
+            "min": 0.0001,
+            "max": 0.1,
+            "step": 0.0001,
+            "tooltip": "Voxel size for dense splat compression."
+          }
+        ],
+        "splat_upsample_max_points": [
+          "INT",
+          {
+            "default": 9000000,
+            "min": 0,
+            "max": 50000000,
+            "step": 100000,
+            "tooltip": "Depth/distance-aware cap for dense splats. Lower values reduce file size; higher values preserve distant surfaces."
+          }
+        ],
+        "splat_upsample_cap_far_bias": [
+          "FLOAT",
+          {
+            "default": 1.75,
+            "min": 0.0,
+            "max": 8.0,
+            "step": 0.05,
+            "tooltip": "Preserve proportionally more far splats when applying the point cap."
+          }
+        ],
+        "splat_camera_source": [
+          [
+            "camera_inputs",
+            "predicted"
+          ],
+          {
+            "default": "camera_inputs",
+            "tooltip": "camera_inputs backprojects depths from input cameras using ICP scale. predicted uses the model predicted cameras."
+          }
+        ],
+        "camera_intrinsics": [
+          "TENSOR",
+          {
+            "tooltip": "Optional: intrinsics from Equirect360ToViews or WorldStereo."
+          }
+        ],
+        "camera_poses": [
+          "TENSOR",
+          {
+            "tooltip": "Optional: camera poses from Equirect360ToViews or WorldStereo."
+          }
+        ],
+        "depth_prior": [
+          "IMAGE",
+          {
+            "tooltip": "Optional depth prior matching the input views."
+          }
+        ]
+      }
+    }
+  }
+}

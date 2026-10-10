@@ -68,3 +68,99 @@ LAN hosting: 26 unit tests pass. A temporary isolated server bound to all IPv4 i
 Cancellation and workspace updates: 29 tests pass, including empty-success ComfyUI cancellation responses, malformed-response diagnostics, portable project export/import with media and ID remapping, and project deletion preserving assets. Browser verified 0.5 MP calculation (928 × 544, 0.505 actual MP at the current aspect ratio), saved-project controls, and no console errors. No GPU generations submitted for these UI changes.
 
 Disconnected cancellation: 32 tests pass. Regression checks cover cancellation while offline, disconnect during history polling, progression to the next queued job, and interrupting only an owned active prompt. Local cancellation is terminal even when remote confirmation fails; monitoring HTTP requests use bounded five-second timeouts and cancellation calls use three-second timeouts.
+
+Scene Writer: 40 tests pass. Added tests for numbered parsing, optional dialogue/sound, invalid numbering/truncation, endpoint normalization, credential redaction and endpoint-change clearing, multimodal request construction, candidate-only behavior, atomic/idempotent approval, scene preservation, and version conflicts. An isolated HTTP mock endpoint verified the complete generate/parse/approve flow with two populated segments and no premature project writes or GPU jobs. Browser checked the connection/image/review controls, a valid script enabling approval, and subsequent edits disabling approval. A real provider/model has not yet been configured or tested. No changes were pushed to GitHub.
+
+Model discovery: 43 tests pass, including normalized model-list URLs, deduplication, saved-key reuse only for matching endpoints, empty lists, and authentication/unsupported-route errors. Browser verified the discovery control and initially hidden model selector. Provider responses were tested with mocks.
+
+SceneCreator TIME recovery: supplied TestOutput successfully parses as five shots through the running API. A missing scene-header TIME can be recovered only from identical explicit TIME values in every shot setting; a review notice explains the recovery. Conflicting/missing shot times still fail. Fixed empty-field validation crossing newline boundaries. 47 tests pass.
+
+Scene Writer per-segment references: 49 tests pass. New approvals copy reference lists independently to each segment. Existing writer scenes migrate once, keeping original shared-first ordering and deduplicating. Tests verify removing from one list does not affect other segments and ordinary scene sharing remains unchanged.
+
+Export duration mismatch: regression checks export an earlier, shorter take in both film and individual-clip modes, respecting its in point and preserving project duration. Longer footage still trims to the timeline request; in points beyond the source remain invalid.
+
+Scene Writer output limits: 54 tests pass. Request tests verify omitted default limits, explicit custom limits, persisted configuration, longer timeouts, and complete versus truncated candidates with a length finish reason. No live long-running LM Studio generation was submitted. Changes remain local.
+
+Continuity prompt experiment: newly parsed and approved Scene Writer segments exclude continuity blocks from their video prompts. Original scripts, per-shot continuity metadata, validation, and scene carryover retain those blocks. Existing segment prompts are unchanged. Parser and approval regression checks cover this separation.
+
+Comfy Cloud toggle: 60 tests pass, including authenticated requests, private credential storage, credential-free signed downloads, cloud encoding dependencies, terminal status polling, targeted cancellation, and missing-node rejection before reference upload. Local routing remains covered by existing tests. No live cloud account or paid inference tested.
+
+Native H3 cloud comparison: 62 tests pass. First-shot and 22/39/56-frame continuation graphs validate against the cloud node inventory retrieved from the configured account. Regression tests cover native-only graphs, video-source queue dependencies, source in-point tail extraction, and absence of custom latent requirements. No paid inference submitted; visual continuity remains to be compared.
+
+Per-segment image reference size: 63 tests pass. Match/Max is stored with each segment and forwarded to both local and native cloud H3 graphs. Older segments default to Match; invalid values are rejected. No GPU generation required.
+
+Image descriptions: 66 tests pass. Image asset details provide a Describe image action using the Scene Writer connection and a dedicated visual-description prompt. Tests cover image payloads, saved and edited descriptions, configuration/type errors, and preserving prior descriptions on failure. No live LLM inference tested.
+
+Segment audio trimming: 68 tests pass. Per-reference in/out selections are stored on the segment, snapshotted for local/cloud jobs, and applied to temporary upload copies. Shared references stay unchanged on other segments. Tests cover invalid bounds, queue isolation, original preservation, and temporary-file cleanup. Project imports remap trim asset IDs.
+
+Waveform trim handles: added draggable IN/OUT handles with highlighted selection, dimmed excluded regions, synchronized number fields, pointer capture, and keyboard adjustment. Browser checked 0.01-second keyboard updates, non-crossing endpoint limits, and reset without applying changes to the user’s segment. JavaScript syntax check passed.
+
+Waveform bar visibility and selection playback: browser verified full-height IN/OUT bars at both waveform ends, dragged boundaries to 0.10–0.35 seconds, and confirmed native audio Play stops paused at 0.35 seconds. Closing without Apply preserves the segment. Both playback controls restart at IN; seeking is bounded to the selection. Static asset versions updated to refresh cached controls.
+
+High quality model override: 69 tests pass. Queue and graph tests cover local/cloud inference with the toggle on, off, or omitted, the exact BF16 model path, unchanged auxiliary models and saved settings, queue snapshot isolation, and invalid flag rejection. JavaScript syntax check passed. No GPU or paid cloud inference submitted.
+
+Turbo LoRA: 69 tests pass. Local/cloud first-shot and continuation graphs load the requested file with LoraLoaderModelOnly at strength 1.0, keep the configured base model, route the adapted model to both guider and scheduler, and use 4 steps. Disabled/omitted Turbo keeps normal steps without the LoRA. Queue snapshots preserve saved segment settings. No GPU or paid inference submitted.
+
+Hosting options toggle: 75 tests pass, including saved mode, explicit launcher overrides, listener rollback on binding/persistence errors, and input validation. An isolated live server switched local → LAN → local without restarting its process; verified LAN access when enabled, denial on existing LAN keep-alive connections and refusal of new LAN connections when disabled, continued local access, and persisted mode. Separate physical-device/firewall access was not tested.
+
+Segment Properties: native collapsible sections cover continuation, prompt, timing, motion continuity, references, generation settings, and takes. Browser verified collapsing References and switching between full and structured prompt views without altering the original text. Node checks cover lossless parsing of freeform/bracket/colon/duplicate sections, grouped dialogue subfields, and edits preserving adjacent sections, including repeated edits of empty fields. No user prompts or projects changed during browser verification.
+
+## Set Studio — 2026-09-23
+
+- 80 automated tests passed, including new coverage for the supplied workflow’s widget/link mapping, PLY download metadata, invalid PLY cleanup, saved poses and attachments, concurrent-save protection, and job completion/cancellation during PLY download.
+- Validated the generated API graph against the connected local ComfyUI node schema. Required WorldMirror V2, SavePLY, and BackgroundPreview nodes were present. No reconstruction inference job was submitted during this validation; actual model execution and a full-size WorldMirror output remain untested.
+- In an isolated test library, loaded a synthetic binary Gaussian PLY with Spark, posed a mannequin, attached a box to its hand, saved/reopened the set, positioned a camera, and rendered 1280×720 PNGs back into image assets. Inspected the output to confirm the splat, mannequin, and prop appear together without editing guides. Browser reported no errors or warnings.
+- Checked JavaScript syntax and exercised the final render path that awaits Gaussian sorting before PNG capture. Test assets and sets were kept outside the user's library.
+
+### Generated splats not appearing — follow-up
+
+The completed PLY files were valid, but the generation UI only registered them in the splat library and left the open set empty. Completed jobs now provide a Show in viewport action; newly queued reconstructions are inserted into their originating set automatically while Set Studio stays open. Loading awaits PLY initialization before framing, and repeated Show actions focus the existing object. Verified the user's generated tavern splat visibly renders in the viewport, with no browser errors. No additional inference jobs were submitted.
+
+### Direct limb selection — 2026-09-24
+
+Added mesh ray picking for mannequin body parts and primitives, drag-vs-click filtering, limb highlight, and rotation control selection. Automated checks cover nearest surface selection, transformed joints, foreground props, orbit drags, right clicks, and gizmo drags. In the browser, clicked the mannequin's right forearm, verified rightElbow was selected, and bent it 70 degrees: hand followed and upper arm stayed fixed. Browser reported no errors. External model research identified Quaternius Universal Animation Library Standard (CC0); no external rig was imported.
+
+### Quaternius integration — 2026-09-24
+
+Bundled the CC0 Standard-edition UAL1_Standard.glb mannequin and its license. New mannequin records use rig=quaternius-v1; old records retain the legacy model. Automated tests load the actual bundled GLB, verify all seventeen mapped joints, independent skeletons/materials, moved hand attachments, saved/restored poses, and ray picking against the skinned surface. Browser verified T pose, direct forearm selection, elbow deformation, and hand-parented box placement with no console errors. No Comfy inference required.
+
+Run rig regression: `node --experimental-loader ./tests/three-loader.mjs --test tests/test_rigged_mannequin.mjs`.
+
+### IK posing
+
+Added two-bone arm/leg IK with world-space target handles, stable bend direction during a drag, reach clamping, and existing pose/undo persistence. Automated checks on the bundled rig verify hand/foot target accuracy under translated, rotated and nonuniformly scaled model roots, unchanged bone positions, and finite results for unreachable targets. Browser verified dragging a hand's X handle bends the elbow while the body remains fixed, with no console errors.
+
+### Qwen image editor and whole-model selection
+
+- Double-clicked the skinned mannequin surface: selected its root and activated move controls; single-click limb picking remains available.
+- 84 Python tests passed, including image-reference count/order, one-image and ten-image graph construction, supplied sampler defaults, queue input validation, immutable queued inputs, V3 reference validation, and PNG collection into assets. JavaScript syntax checks passed.
+- Compared the graph with the connected local ComfyUI schema and confirmed required nodes and model names are available.
+- Ran two live 320×320, 25-step edits through the isolated Set Studio UI: first with only the captured frame, then with that frame plus an additional reference as image 2. Both completed successfully in approximately 14 seconds each. Verified returned images appeared automatically in the viewport and Back to 3D scene restored the editor. No browser errors.
+- Maximum reference count is covered by automated graph/queue tests; the live run used two images. Test assets/jobs remained in `/tmp/frameforge-qwen-validation`, outside the user's library.
+
+### Hand pose sliders — 2026-09-25
+
+Added independent left/right whole-hand grasp and five finger curl sliders, interpolating the bundled rig's authored open and fist poses across all three joints per finger. Tests verify independent fingers, opposite hands and mannequin instances; unchanged wrist orientation; finger movement; and exact restoration from saved hand values. Browser verified closing a hand then opening its index finger alone, with visible deformation and no console errors. No Comfy jobs or user-library test assets were created.
+
+Prompt improver: 88 Python tests pass, including exact supplied system prompt, camera/reference ordering, invalid/truncated responses and the multipart endpoint without asset-library writes. The frontend test covers replacement, undo, request failure and changes to the prompt or set during a request. Set Studio's Improve prompt button was verified in the browser. LLM replies were mocked; no live inference was required.
+
+GLB import: all 91 Python tests pass, covering real GLB upload, stored model retrieval, set save/reopen with model transforms, missing model rejection, invalid upload cleanup, external-resource rejection and unsupported compression. In an isolated browser editor, imported the bundled Quaternius GLB, added it to the set, saved the set, and rendered a PNG. Visually verified the model and original yellow/purple materials in the render. No user library assets or inference jobs were created by validation.
+
+GLB lighting: added a neutral omnidirectional environment alongside existing lights so metallic PBR materials receive reflected fill. Validated in the isolated editor with a fully metallic GLB and inspected the camera PNG: surfaces away from the key light remain illuminated. Material maps and authored metalness/roughness are preserved; the environment also applies with textures disabled.
+
+Full-reference Scene Writer guide: 96 backend tests pass, including new six-section validation, consecutive segment numbering, internal shot cuts, exact dialogue preservation, mocked LLM requests with target duration, and approval into isolated timeline segments. Node tests verify six-field round trips and isolated edits, plus legacy parsing. Browser verified all six new fields and retained legacy text in Segment Properties. No real LLM or GPU generation submitted; prompt quality remains to be assessed with the connected model. Restarted idle editor to load parser.
+
+Full-reference validation compatibility: 99 backend tests pass. Normalizes CRLF input, accepts indented/case-varied SEGMENT headers and indented field headings, distinguishes internal shot counts from timeline segment counts with an explicit preview warning, and reports actual counts on unexplained mismatches. Missing/duplicate segment and internal-shot numbering still fails. The reported user candidate was not visible in the selected project; exact-candidate verification remains pending.
+
+Exact supplied full-reference candidate: detected preliminary duplicate audio sections before summary and complete audio sections after detailed_description. Parser now uses the final audio sections with explicit preview warnings while preserving the original script. Other ambiguous duplicates remain rejected. All 101 tests pass; the exact supplied candidate returns HTTP 200 from the running parse endpoint with one timeline segment, six internal shots, and three warnings. No timeline approval or inference submitted.
+
+## Single-track timeline and motion links
+- All scenes' segments render sequentially on one timeline track, with scene labels and reference thumbnails.
+- Motion continuity can link any source segment, including across scenes and later timeline positions. Queue order follows dependencies without changing playback/export order.
+- Tests cover local/cloud dependency ordering, trimmed-import encoding, cyclic/missing links, previous-segment links across scenes, and project archive ID remapping.
+- Python suite: 106 tests passed. JavaScript syntax check passed. Live browser: 54 clips on exactly one track, all at the same vertical position, and 54 source selector choices. No inference jobs submitted.
+
+## Manual saves and crash recovery
+- Manual Save/Save As commit separate saved-project snapshots; working edits and job/Scene Writer updates remain recovery state until committed.
+- Existing libraries migrate their current projects into initial saved snapshots once. Recovery choices are offered on reopen and project selection; Manage also allows reverting.
+- 115 Python tests pass, including restart persistence, save isolation, version conflict handling, independent Save As copies, and active-job protection when reverting. JavaScript syntax checked. Live UI Save and Save As dialog verified without modifying user projects.

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Frameforge · Local video studio</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-    <link rel="stylesheet" href="/static/style.css" />
+    <link rel="stylesheet" href="/static/style.css?v=manual-save-1" />
   </head>
   <body>
     <header class="appbar">
@@ -22,7 +22,7 @@
           title="Rename, export, import or delete saved projects"
         >
           Manage</button
-        ><span id="save-state">Saved locally</span>
+        ><button id="save-project" class="small" title="Save project (Ctrl+S)">Save</button><button id="save-as-project" class="small" title="Save a named copy (Ctrl+Shift+S)">Save As</button><span id="save-state">Saved</span>
       </div>
       <div class="header-actions">
         <button id="connection" class="connection">
@@ -36,7 +36,8 @@
     <nav class="workspace-nav">
       <div class="tabs">
         <button class="active" id="edit-tab">▤ &nbsp; Editor</button
-        ><button id="speech-btn">≋ &nbsp; Speech studio</button
+        ><button id="scene-writer-btn">✎ &nbsp; Scene writer</button
+        ><button id="set-studio-btn" onclick="location.href='/static/set-studio.html'">▧ &nbsp; Set Studio</button><button id="speech-btn">≋ &nbsp; Speech studio</button
         ><button id="jobs-btn">
           ☷ &nbsp; Generation queue
           <span class="count" id="jobs-count">0</span>
@@ -165,20 +166,15 @@
           <div class="timeline-actions">
             <button id="add-scene" class="small">＋ Scene</button
             ><button id="add-segment" class="small">＋ Segment</button
-            ><label class="zoom"
-              >−
-              <input
-                id="zoom"
-                type="range"
-                min="25"
-                max="120"
-                value="55"
-                aria-label="Timeline zoom"
-              />
-              ＋</label
             ><button id="queue-selected" class="primary">
-              ✦ Queue selected
-            </button>
+              ✦ Queue selected</button
+            ><label
+              class="cloud-toggle"
+              title="Use the native H3 Add Guide cloud workflow for timeline generations"
+              ><input type="checkbox" id="cloud-inference" /> Cloud
+              inference</label
+            ><label class="cloud-toggle" title="Apply the Turbo LoRA to your configured model and generate with 4 steps"><input type="checkbox" id="turbo" /> Turbo</label
+            ><button id="cloud-setup" class="small">Cloud setup</button>
           </div>
         </div>
         <div class="timeline-body">
@@ -186,6 +182,16 @@
           <div class="tracks-scroll" id="tracks-scroll">
             <div id="ruler" class="ruler"></div>
             <div id="tracks"></div>
+          </div>
+        </div>
+        <div class="timeline-navigator">
+          <span class="navigator-label">Zoom · drag ends</span>
+          <div id="timeline-range" class="timeline-range" title="Drag either end to zoom · Drag the middle to scroll">
+            <div id="timeline-window" class="timeline-window" tabindex="0" role="scrollbar" aria-label="Visible timeline range" aria-controls="tracks-scroll" aria-orientation="horizontal">
+              <span class="range-grip" data-range-edge="left" tabindex="0" role="slider" title="Drag to change the start of the visible range" aria-label="Timeline view start" aria-orientation="horizontal"></span>
+              <span class="range-center" aria-hidden="true"></span>
+              <span class="range-grip" data-range-edge="right" tabindex="0" role="slider" title="Drag to change the end of the visible range" aria-label="Timeline view end" aria-orientation="horizontal"></span>
+            </div>
           </div>
         </div>
         <footer class="statusbar">
@@ -205,6 +211,6 @@
     />
     <dialog id="modal"><div id="modal-content"></div></dialog>
     <div id="toasts" role="status" aria-live="polite"></div>
-    <script type="module" src="/static/app.js"></script>
+    <script type="module" src="/static/app.js?v=manual-save-1"></script>
   </body>
 </html>

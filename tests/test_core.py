@@ -9,6 +9,18 @@ from editor.comfy import JobRunner
 from unittest.mock import patch
 
 class FrameAndGraphTests(unittest.TestCase):
+    def test_image_reference_size_local_cloud_and_legacy(self):
+        from editor.workflows import h3_cloud_graph
+        for value in ('match','max',None):
+            p=project();s=p['scenes'][0]['segments'][0]
+            if value is None:s.pop('ref_image_size',None)
+            else:s['ref_image_size']=value
+            check_project(p,{})
+            for build in (h3_graph,h3_cloud_graph):
+                self.assertEqual(build(s,[],DEFAULT_MODELS,'test')['reference']['inputs']['ref_image_size'],value or 'match')
+        s['ref_image_size']='invalid'
+        with self.assertRaisesRegex(ValueError,'Image reference size'):check_project(p,{})
+
     def test_delivered_duration_never_shrinks(self):
         for seconds in [.25,3,3.5,4,7,11,30]:
             for overlap in [0,22,39,56]:

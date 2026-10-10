@@ -1,3 +1,7 @@
+import {changeTimelineRange} from '/static/timeline-range.js';
+import {orderedReferences,moveImageReference} from '/static/reference-order.js';
+import { HELP, LEGACY_HELP, parsePrompt, joinPrompt, editPromptPart } from "/static/prompt-fields.js?v=4";
+import { showSceneWriter } from "/static/scene-writer.js?v=sections-only-1";
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 const esc = (s) =>
@@ -103,20 +107,89 @@ function checkpoint() {
   if (undo.length > 60) undo.shift();
   redo = [];
 }
+function projectContent(p) {
+  if (!p) return "";
+  const copy = clone(p);
+  delete copy.version;
+  return JSON.stringify(copy);
+}
+function hasUnfinalizedChanges() {
+  return projectContent(project) !== projectContent(state?.saved_projects?.[project?.id]);
+}
+function updateSaveState() {
+  if (!project) return;
+  $("#save-state").textContent = hasUnfinalizedChanges()
+    ? (dirty ? "Unsaved changes · recovery pending" : "Unsaved changes · recovery protected") : "Saved";
+  $("#save-state").className = hasUnfinalizedChanges() ? "pending" : "";
+  $("#save-project").textContent = hasUnfinalizedChanges() ? "Save *" : "Save";
+  $("#save-project").title = $("#save-state").textContent + " · Ctrl+S";
+}
+async function manualSave(name) {
+  await syncRecovery();
+  const sourceId = project.id;
+  const snapshot = clone(project);
+  const result = await api(`/api/projects/${sourceId}/commit`, {
+    version: snapshot.version, ...(name === undefined ? {} : {name}),
+  });
+  state.saved_projects ||= {};
+  state.saved_projects[result.id] = clone(result);
+  if (name !== undefined) {
+    // New edits made during the request remain unsaved in the new copy.
+    project.id = result.id;
+    project.name = result.name;
+    project.version = result.version;
+    savedProject = clone(result);
+    state.projects[result.id] = clone(result);
+    undo = []; redo = [];
+    localStorage.setItem("frameforge-project", result.id);
+    if (dirty) changed(false);
+  }
+  updateSaveState();
+  renderHeader();
+  toast(name === undefined ? "Project saved." : "Project saved as “" + result.name + "”.");
+}
+function showSaveAs() {
+  modal("Save project as", `<label class="field"><span>Project name</span><input id="save-as-name" value="${esc(project.name + " copy")}"></label><p class="hint">Creates a separate saved project using the current edits. Media files are shared with the library.</p>`, '<button id="save-as-confirm" class="primary">Save As</button>');
+  $("#save-as-confirm").onclick = guard(async () => {
+    const name = $("#save-as-name").value.trim();
+    if (!name) throw Error("Enter a project name.");
+    const button = $("#save-as-confirm"); button.disabled = true;
+    try { await manualSave(name); $("#modal").close(); }
+    finally { button.disabled = false; }
+  });
+}
+function offerRecovery() {
+  if (!hasUnfinalizedChanges()) return;
+  modal("Recover unfinished work", `<p>There are unfinished changes for <b>${esc(project.name)}</b>. Your last manually saved version is unchanged.</p><p>Recover the unfinished work to keep editing, or return to the last saved version.</p>`, '<button id="recover-work" class="primary">Recover work</button><button id="discard-work" class="small">Use last saved version</button>');
+  $("#recover-work").onclick = guard(async () => { await syncRecovery(); $("#modal").close(); updateSaveState(); });
+  $("#discard-work").onclick = guard(async () => {
+    clearTimeout(saveTimer);
+    while (saving) await new Promise(resolve => setTimeout(resolve, 100));
+    const latest = (await api("/api/state")).projects[project.id];
+    const result = await api(`/api/projects/${project.id}/discard-recovery`, {version:latest.version});
+    project = clone(result); savedProject = clone(result); state.projects[result.id] = clone(result);
+    dirty = false; undo = []; redo = [];
+    localStorage.removeItem("frameforge-unsaved");
+    sceneId = project.scenes[0]?.id; segmentId = scene()?.segments[0]?.id;
+    selected = new Set(segmentId ? [segmentId] : []);
+    $("#modal").close(); renderAll(); updateSaveState();
+  });
+}
 function changed(render = true) {
   dirty = true;
-  localStorage.setItem("frameforge-unsaved", JSON.stringify(project));
-  $("#save-state").textContent = "Saving…";
+  try { localStorage.setItem("frameforge-unsaved", JSON.stringify(project)); } catch {}
+  $("#save-state").textContent = "Unsaved changes · protecting recovery…";
   $("#save-state").className = "pending";
+  updateSaveState();
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => guard(save)(), 500);
+  saveTimer = setTimeout(() => guard(syncRecovery)(), 500);
   if (render) renderAll();
 }
-async function save() {
+async function syncRecovery() {
   clearTimeout(saveTimer);
   if (saving) {
     await new Promise((r) => setTimeout(r, 100));
-    return save();
+    return syncRecovery();
   }
   if (!dirty) return;
   saving = true;
@@ -180,10 +253,10 @@ async function save() {
     ) {
       dirty = false;
       localStorage.removeItem("frameforge-unsaved");
-      $("#save-state").textContent = "Saved locally";
-      $("#save-state").className = "";
+      updateSaveState();
+
     } else {
-      saveTimer = setTimeout(() => guard(save)(), 100);
+      saveTimer = setTimeout(() => guard(syncRecovery)(), 100);
     }
   } finally {
     saving = false;
@@ -211,7 +284,9 @@ function newSegment() {
     takes: [],
     trim_in: 0,
     seed: randomSeed(),
+    randomize_seed: true,
     steps: 20,
+    ref_image_size: "match",
     width: project.width,
     height: project.height,
     continuation: null,
@@ -240,6 +315,7 @@ function renderAll() {
   renderPreview();
 }
 function renderHeader() {
+  updateSaveState();
   $("#jobs-count").classList.toggle(
     "queue-active",
     state.jobs.some((j) => activeStatuses.includes(j.status)),
@@ -314,7 +390,7 @@ function renderAssets() {
   });
 }
 function refIds() {
-  return [...new Set([...(scene()?.refs || []), ...(segment()?.refs || [])])];
+  return orderedReferences(scene(),segment());
 }
 function refList(ids, shared = false) {
   let counts = { image: 0, video: 0, audio: 0 };
@@ -326,11 +402,118 @@ function refList(ids, shared = false) {
         if (!a) return "";
         const index = ++counts[a.kind];
         const tag = `${{ image: "Picture", video: "Video", audio: "Audio" }[a.kind]} ${index}`;
-        return `<div class="reference-slot ${shared ? "shared" : ""}">${a.kind === "audio" ? '<span class="reference-icon">♫</span>' : `<img class="reference-icon" src="${url(aid, true)}" alt="${esc(a.name)}">`}<code>${tag}</code><span title="${esc(a.name)}">${esc(a.name)}</span><button data-insert="${esc(tag)}" title="Insert reference tag into prompt">↙</button>${shared ? "<small>scene</small>" : `<button data-remove="${aid}" title="Remove reference">×</button>`}</div>`;
+        return `<div class="reference-slot ${shared ? "shared" : ""}" ${a.kind === "image" && !shared ? `draggable="true" data-reorder-image="${aid}" title="Drag to reorder image references"` : ""}>${a.kind === "audio" ? '<span class="reference-icon">♫</span>' : `<img draggable="false" class="reference-icon" src="${url(aid, true)}" alt="${esc(a.name)}">`}<code>${tag}</code>${a.kind === "audio" ? `<button data-trim-reference="${aid}" title="Trim audio for this segment" aria-label="Trim ${esc(a.name)} for this segment">✂${segment()?.audio_trims?.[aid] ? " Trimmed" : ""}</button>` : ""}<span title="${esc(a.name)}">${esc(a.name)}</span><button data-insert="${esc(tag)}" title="Insert reference tag into prompt">↙</button>${shared ? "<small>scene</small>" : `<button data-remove="${aid}" title="Remove reference">×</button>`}</div>`;
       })
       .join("") +
     "</div>"
   );
+}
+const propertySections = new Map();
+let promptFieldMode = false;
+function setupPropertySections() {
+  const root = $("#properties");
+  const wrap = (elements, title) => {
+    const detail = document.createElement("details");
+    detail.className = "inspector-section";
+    const summary = document.createElement("summary");
+    summary.textContent = title;
+    elements[0].before(detail);
+    detail.append(summary, ...elements);
+    return detail;
+  };
+  const promptLabel = $("#prompt").closest("label");
+  wrap([promptLabel], "Prompt");
+  wrap([$("[data-prop=duration]").closest(".row")], "Timing");
+  $$("div.inspector-section", root).forEach(section => {
+    const heading = $(".section-heading", section);
+    if (!heading) return;
+    const detail = document.createElement("details");
+    detail.className = section.className;
+    const summary = document.createElement("summary");
+    const title = $("h3", heading);
+    summary.textContent = title.textContent;
+    detail.dataset.sectionKey = title.textContent;
+    title.remove();
+    const button = $("button", heading);
+    if (button) section.insertBefore(button, heading.nextSibling);
+    summary.append(...heading.childNodes);
+    heading.remove();
+    detail.append(summary, ...section.childNodes);
+    section.replaceWith(detail);
+  });
+  $$("details", root).forEach(detail => {
+    const key = detail.dataset.sectionKey || $("summary", detail).textContent;
+    detail.open = propertySections.get(key) ?? key !== "Generation settings";
+    detail.ontoggle = () => { if (detail.isConnected) propertySections.set(key, detail.open); };
+  });
+}
+function setupPromptFields(s) {
+  const full = $("#prompt");
+  const label = full.closest("label");
+  const controls = document.createElement("div");
+  controls.className = "prompt-view";
+  controls.innerHTML = '<span class="field-label">Prompt view</span><div class="row"><button type="button" id="prompt-full-mode" class="small">Full prompt</button><button type="button" id="prompt-fields-mode" class="small">Structured fields</button></div>';
+  label.before(controls);
+  const fields = document.createElement("div");
+  fields.className = "prompt-fields";
+  label.after(fields);
+  const writerButton = document.createElement("button");
+  writerButton.className = "small";
+  writerButton.id = "segment-scene-writer";
+  writerButton.textContent = "✎ Open Scene Writer";
+  writerButton.onclick = guard(() => openSceneWriter(s));
+  fields.after(writerButton);
+  const render = () => {
+    label.hidden = promptFieldMode;
+    fields.hidden = !promptFieldMode;
+    $("#prompt-full-mode").setAttribute("aria-pressed", String(!promptFieldMode));
+    $("#prompt-fields-mode").setAttribute("aria-pressed", String(promptFieldMode));
+    if (!promptFieldMode) return;
+    const parts = parsePrompt(s.prompt);
+    const existing = new Set(parts.map(p => p.label));
+    for (const key of Object.keys(HELP)) {
+      if (key === "CONTINUITY" || existing.has(key)) continue;
+      parts.push({label:key, header:'', value:'', missing:true});
+    }
+    fields.innerHTML = '<p class="hint">Edit labeled sections of the same prompt. The six full-reference guide sections share one prompt. Existing or unlabeled text is preserved; switching views does not rewrite it.</p>' + parts.map((part,i) => `<label class="field"><span>${esc(part.label.replaceAll("_", " "))}</span><small class="hint">${esc(HELP[part.label] || LEGACY_HELP[part.label] || (part.label === 'Other text' ? 'Freeform instructions and shot headings preserved from your prompt.' : 'Additional instructions from your prompt.'))}</small><textarea data-prompt-part="${i}" rows="${part.label === "detailed_description" ? 12 : 3}">${esc(part.value.trim())}</textarea></label>`).join('');
+    $$("[data-prompt-part]", fields).forEach(input => {
+      input.onfocus = () => checkpoint();
+      input.oninput = () => {
+        const index = Number(input.dataset.promptPart), part = parts[index];
+        if (part.missing && input.value) {
+          part.header = (joinPrompt(parts) ? '\n\n' : '') + part.label + ': ';
+          part.missing = false;
+        }
+        full.value = editPromptPart(parts,index,input.value);
+        full.dispatchEvent(new Event('input'));
+      };
+    });
+  };
+  $("#prompt-full-mode").onclick = () => { promptFieldMode = false; render(); };
+  $("#prompt-fields-mode").onclick = () => { promptFieldMode = true; render(); };
+  render();
+}
+function motionSource(seg) {
+  if (seg.continuation || seg.type === "video") return null;
+  const segments = allSegments();
+  return seg.continuation_segment
+    ? segments.find(x => x.id === seg.continuation_segment)
+    : seg.connected ? segments[segments.indexOf(seg)-1] : null;
+}
+function canLinkMotion(target, source) {
+  const seen = new Set([target.id]);
+  while (source) {
+    if (seen.has(source.id)) return false;
+    seen.add(source.id);
+    source = motionSource(source);
+  }
+  return true;
+}
+function detachMotionLinks(ids) {
+  for (const seg of allSegments()) if (ids.includes(seg.continuation_segment)) {
+    seg.continuation_segment = null;
+    seg.connected = false;
+  }
 }
 function renderProperties() {
   const s = segment(),
@@ -348,7 +531,7 @@ function renderProperties() {
     ).length;
   const idx = sc.segments.findIndex((x) => x.id === s.id);
   $("#properties").innerHTML =
-    `<div><label class="field"><span>Segment name</span><input data-prop="name" value="${esc(s.name)}"></label><label class="field"><span>Prompt <span class="subtle">/ describe this shot</span></span><textarea data-prop="prompt" id="prompt" rows="5" placeholder="A slow dolly toward the character in &lt;Picture 1&gt;. Soft window light. She turns and says…">${esc(s.prompt)}</textarea></label><div class="row"><label class="field"><span>Delivered duration</span><input data-prop="duration" type="number" min="0.25" max="${s.type === "video" ? 86400 : 120}" step="0.041666667" value="${s.duration}"></label><label class="field"><span>Source in point</span><input data-prop="trim_in" type="number" min="0" step="0.041666667" value="${s.trim_in || 0}"></label></div><div class="inspector-section"><div class="section-heading"><h3>Motion continuity</h3><span class="badge">24 FPS</span></div><label class="check"><input id="connected" type="checkbox" ${s.connected ? "checked" : ""} ${idx === 0 ? "disabled" : ""}> Continue the previous segment</label><span class="field-label">Context overlap · frames</span><div class="overlap-options">${[22, 39, 56].map((n) => `<button data-overlap="${n}" class="${s.overlap === n ? "active" : ""}">${n} <span class="subtle">/ ${(n / 24).toFixed(2)}s</span></button>`).join("")}</div><p class="hint">Context is generated before this shot, then trimmed. H3 rounds up to its frame grid; the first selected result sets the actual duration. Use the full take for seamless latent joins.</p><label class="field"><span>Or continue an imported / saved take</span><select id="continuation"><option value="">${idx ? "Use previous segment when connected" : "Start a new chain"}</option>${Object.values(
+    `<div><label class="field"><span>Segment name</span><input data-prop="name" value="${esc(s.name)}"></label><label class="field"><span>Prompt <span class="subtle">/ describe this shot</span></span><textarea data-prop="prompt" id="prompt" rows="5" placeholder="A slow dolly toward the character in &lt;Picture 1&gt;. Soft window light. She turns and says…">${esc(s.prompt)}</textarea></label><div class="row"><label class="field"><span>Delivered duration</span><input data-prop="duration" type="number" min="0.25" max="${s.type === "video" ? 86400 : 120}" step="0.041666667" value="${s.duration}"></label><label class="field"><span>Source in point</span><input data-prop="trim_in" type="number" min="0" step="0.041666667" value="${s.trim_in || 0}"></label></div><div class="inspector-section"><div class="section-heading"><h3>Motion continuity</h3><span class="badge">24 FPS</span></div><label class="check"><input id="connected" type="checkbox" ${s.connected ? "checked" : ""} ${allSegments().indexOf(s) === 0 ? "disabled" : ""}> Continue the previous timeline segment</label><label class="field"><span>Latent motion continuation · source segment</span><select id="continuation-segment"><option value="">${s.connected ? "Previous timeline segment" : "No segment link"}</option>${project.scenes.flatMap(sourceScene => sourceScene.segments.filter(source => source.id !== s.id).map(source => `<option value="${source.id}" ${s.continuation_segment === source.id ? "selected" : ""} ${canLinkMotion(s, source) ? "" : "disabled"}>${esc(sourceScene.name)} / ${esc(source.name)}</option>`)).join("")}</select></label><p class="hint">Link any segment, including another scene. Queuing both generates the source first. Otherwise its current main take supplies motion context.</p><span class="field-label">Context overlap · frames</span><div class="overlap-options">${[22, 39, 56].map((n) => `<button data-overlap="${n}" class="${s.overlap === n ? "active" : ""}">${n} <span class="subtle">/ ${(n / 24).toFixed(2)}s</span></button>`).join("")}</div><p class="hint">Context is generated before this shot, then trimmed. H3 rounds up to its frame grid; the first selected result sets the actual duration. Use the full take for seamless latent joins.</p><label class="field"><span>Or continue an imported / saved take</span><select id="continuation"><option value="">${idx ? "Use previous segment when connected" : "Start a new chain"}</option>${Object.values(
       state.assets,
     )
       .filter((a) => a.kind === "video")
@@ -358,7 +541,7 @@ function renderProperties() {
       )
       .join(
         "",
-      )}</select></label></div></div><div><div class="inspector-section" style="margin-top:0"><div class="section-heading"><h3>References</h3><button id="pick-refs" class="small">＋ Add</button></div><p class="hint">${counts.image}/9 images &nbsp; ${counts.video}/3 video &nbsp; ${counts.audio}/3 audio</p>${refIds().length ? refList(refIds()).replace(/<button data-remove="([^"]+)" title="Remove reference">×<\/button>/g, (m, aid) => (shared.includes(aid) ? "<small>scene</small>" : m)) : '<div class="ref-empty">Drop assets here or add from the library</div>'}<button id="scene-settings" class="small" style="margin-top:9px;width:100%">▧ Shared scene assets & settings</button></div><details><summary>Generation settings</summary><div class="row"><div class="field"><label for="segment-seed">Seed</label><div class="seed-control"><input id="segment-seed" data-prop="seed" type="number" min="0" max="9007199254740991" step="1" value="${s.seed}"><button id="randomize-segment-seed" type="button" class="small" title="Choose a new random seed" aria-label="Randomize segment seed">⚄ Randomize</button></div><label class="check"><input id="auto-segment-seed" type="checkbox" ${s.randomize_seed ? "checked" : ""}> Randomize each generation</label></div><label class="field"><span>Steps</span><input data-prop="steps" type="number" min="1" max="100" value="${s.steps}"></label></div><p class="hint">${project.width} × ${project.height} · H3 · 24 fps. Resolution is shared across the project for compatible latents.</p></details><div class="inspector-section"><div class="section-heading"><h3>Generated takes</h3><span class="count">${s.takes.length}</span></div><div class="take-list">${s.takes.map((aid) => (state.assets[aid] ? `<div class="take-item"><img src="${url(aid, true)}" alt=""><span>${esc(state.assets[aid].name)}</span><button class="small" data-take="${aid}">${s.main === aid ? "Main" : "Use"}</button><a class="small" href="${url(aid)}" download="${esc(state.assets[aid].name)}${esc(state.assets[aid].file.slice(state.assets[aid].file.lastIndexOf(".")))}" title="Download this take" aria-label="Download ${esc(state.assets[aid].name)}">↓</a></div>` : "")).join("") || '<p class="hint">Every generated take stays in your asset library. Choose any take as the main video.</p>'}</div></div><div class="inspector-section inspector-actions"><button id="duplicate-segment" class="small">Duplicate</button><button id="delete-segment" class="small danger">Delete segment</button></div></div>`;
+      )}</select></label></div></div><div><div class="inspector-section" style="margin-top:0"><div class="section-heading"><h3>References</h3><button id="pick-refs" class="small">＋ Add</button></div><p class="hint">${counts.image}/9 images &nbsp; ${counts.video}/3 video &nbsp; ${counts.audio}/3 audio</p>${refIds().length ? refList(refIds()).replace(/<button data-remove="([^"]+)" title="Remove reference">×<\/button>/g, (m, aid) => (shared.includes(aid) ? "<small>scene</small>" : m)) : '<div class="ref-empty">Drop assets here or add from the library</div>'}<button id="scene-settings" class="small" style="margin-top:9px;width:100%">▧ Shared scene assets & settings</button></div><details><summary>Generation settings</summary><label class="field"><span>Image reference size</span><select data-prop="ref_image_size"><option value="match" ${(s.ref_image_size || "match") === "match" ? "selected" : ""}>Match</option><option value="max" ${s.ref_image_size === "max" ? "selected" : ""}>Max</option></select></label><p class="hint">Match scales references down to the generation’s pixel area. Max uses a 2048px short edge for finer identity detail and can be considerably slower.</p><div class="row"><div class="field"><label for="segment-seed">Seed</label><div class="seed-control"><input id="segment-seed" data-prop="seed" type="number" min="0" max="9007199254740991" step="1" value="${s.seed}"><button id="randomize-segment-seed" type="button" class="small" title="Choose a new random seed" aria-label="Randomize segment seed">⚄ Randomize</button></div><label class="check"><input id="auto-segment-seed" type="checkbox" ${s.randomize_seed ? "checked" : ""}> Randomize each generation</label></div><label class="field"><span>Steps</span><input data-prop="steps" type="number" min="1" max="100" value="${s.steps}"></label></div><p class="hint">${project.width} × ${project.height} · H3 · 24 fps. Resolution is shared across the project for compatible latents.</p></details><div class="inspector-section"><div class="section-heading"><h3>Generated takes</h3><span class="count">${s.takes.length}</span></div><button id="match-main-duration" type="button" class="small" hidden></button><div class="take-list">${s.takes.map((aid) => (state.assets[aid] ? `<div class="take-item"><img src="${url(aid, true)}" alt=""><span>${esc(state.assets[aid].name)}</span><button class="small" data-take="${aid}">${s.main === aid ? "Main" : "Use"}</button><a class="small" href="${url(aid)}" download="${esc(state.assets[aid].name)}${esc(state.assets[aid].file.slice(state.assets[aid].file.lastIndexOf(".")))}" title="Download this take" aria-label="Download ${esc(state.assets[aid].name)}">↓</a></div>` : "")).join("") || '<p class="hint">Every generated take stays in your asset library. Choose any take as the main video.</p>'}</div></div><div class="inspector-section inspector-actions"><button id="duplicate-segment" class="small">Duplicate</button><button id="delete-segment" class="small danger">Delete segment</button></div></div>`;
   if (s.main) {
     const section = document.createElement("div");
     section.className = "inspector-section";
@@ -368,6 +551,24 @@ function renderProperties() {
     $("#encode-segment").onclick = guard(encodeSelectedSegment);
     $("#add-continuation").onclick = addContinuation;
   }
+  const matchDuration = $("#match-main-duration");
+  const updateMatchDuration = () => {
+    const main = state.assets[s.main];
+    const duration = Number(main?.duration);
+    matchDuration.hidden = main?.kind !== "video" || !Number.isFinite(duration) || duration <= 0 || Math.abs(s.duration - duration) < 0.001;
+    matchDuration.textContent = `Match main video length · ${fmt(duration)}`;
+    matchDuration.title = "Use the full main video duration and reset the source in point to zero.";
+  };
+  updateMatchDuration();
+  matchDuration.onclick = () => {
+    const main = state.assets[s.main];
+    if (main?.kind !== "video" || !Number.isFinite(main.duration) || main.duration <= 0) return;
+    edit(() => {
+      s.duration = main.duration;
+      s.trim_in = 0;
+      delete s.encoded_latent;
+    });
+  };
   $$("[data-prop]", $("#properties")).forEach((el) => {
     el.onfocus = () => checkpoint();
     el.oninput = () => {
@@ -381,6 +582,7 @@ function renderProperties() {
       )
         return;
       s[el.dataset.prop] = value;
+      updateMatchDuration();
       changed(false);
       renderTimeline();
       renderPreview();
@@ -389,13 +591,45 @@ function renderProperties() {
       if (el.type === "number") el.value = s[el.dataset.prop];
     };
   });
+  let draggedReference=null;
+  const imageSlots=$$("[data-reorder-image]",$("#properties"));
+  const clearReferenceDrag=()=>imageSlots.forEach(el=>el.classList.remove('reference-dragging','reference-drop-target'));
+  imageSlots.forEach(el=>{
+    el.ondragstart=e=>{
+      draggedReference=el.dataset.reorderImage;
+      e.stopPropagation();e.dataTransfer.effectAllowed='move';
+      e.dataTransfer.setData('application/frameforge-reference',draggedReference);
+      el.classList.add('reference-dragging');
+    };
+    el.ondragover=e=>{
+      if(!draggedReference||!e.dataTransfer.types.includes('application/frameforge-reference'))return;
+      e.preventDefault();e.stopPropagation();e.dataTransfer.dropEffect='move';
+      imageSlots.forEach(slot=>slot.classList.toggle('reference-drop-target',slot===el&&slot.dataset.reorderImage!==draggedReference));
+    };
+    el.ondragleave=()=>el.classList.remove('reference-drop-target');
+    el.ondragend=()=>{draggedReference=null;clearReferenceDrag()};
+    el.ondrop=e=>{
+      if(!draggedReference||!e.dataTransfer.types.includes('application/frameforge-reference'))return;
+      e.preventDefault();e.stopPropagation();const source=draggedReference;draggedReference=null;clearReferenceDrag();
+      const target=el.dataset.reorderImage;if(source===target)return;
+      edit(()=>{s.ref_order=moveImageReference(refIds(),state.assets,source,target)});
+      toast('Image references reordered. Review Picture numbers in your prompt.');
+    };
+  });
+  setupPropertySections();
+  setupPromptFields(s);
   $("#connected").onchange = (e) =>
-    edit(() => (s.connected = e.target.checked));
+    edit(() => { s.connected = e.target.checked; s.continuation_segment = null; s.continuation = null; });
   $("#continuation").onchange = (e) =>
-    edit(() => (s.continuation = e.target.value || null));
+    edit(() => { s.continuation = e.target.value || null; s.continuation_segment = null; s.connected = false; });
+  $("#continuation-segment").onchange = (e) =>
+    edit(() => { s.continuation_segment = e.target.value || null; s.continuation = null; s.connected = false; });
   $$("[data-overlap]").forEach(
     (b) =>
       (b.onclick = () => edit(() => (s.overlap = Number(b.dataset.overlap)))),
+  );
+  $$("[data-trim-reference]", $("#properties")).forEach(
+    (b) => (b.onclick = () => showSegmentAudioTrim(b.dataset.trimReference, s)),
   );
   $$("[data-remove]").forEach(
     (b) =>
@@ -409,6 +643,8 @@ function renderProperties() {
           () =>
             (s.prompt += (s.prompt ? " " : "") + "<" + b.dataset.insert + ">"),
         );
+        $("#prompt-full-mode").click();
+        $("#prompt").closest("details").open = true;
         $("#prompt").focus();
       }),
   );
@@ -435,12 +671,14 @@ function renderProperties() {
       copy.id = id();
       copy.name += " copy";
       copy.connected = false;
+      copy.continuation_segment = null;
       sc.segments.splice(idx + 1, 0, copy);
       segmentId = copy.id;
       selected = new Set([copy.id]);
     });
   $("#delete-segment").onclick = () =>
     edit(() => {
+      detachMotionLinks([s.id]);
       sc.segments.splice(idx, 1);
       segmentId = sc.segments[Math.max(0, idx - 1)]?.id;
       selected = new Set(segmentId ? [segmentId] : []);
@@ -460,6 +698,191 @@ function renderProperties() {
     if (aid) addReference(aid);
   });
 }
+function showSegmentAudioTrim(aid, seg) {
+  const a = state.assets[aid];
+  if (!a || a.kind !== "audio") return;
+  const trim = seg.audio_trims?.[aid] || { start: 0, end: a.duration };
+  modal(
+    "Trim audio for " + seg.name,
+    `<p class="hint">${esc(a.name)} · ${fmt(a.duration)}. This selection applies only to this segment, including when the reference is shared by the scene.</p><div class="audio-trim-track" id="ref-trim-track">${wave(a, true)}<div class="audio-trim-shade before" id="ref-trim-before"></div><div class="audio-trim-shade after" id="ref-trim-after"></div><div class="audio-trim-selection" id="ref-trim-selection"></div><button type="button" role="slider" class="audio-trim-handle in" id="ref-trim-in-handle" aria-label="Audio in point" aria-orientation="horizontal"><span>IN</span></button><button type="button" role="slider" class="audio-trim-handle out" id="ref-trim-out-handle" aria-label="Audio out point" aria-orientation="horizontal"><span>OUT</span></button></div><p class="hint">Drag the IN and OUT handles to select audio. Arrow keys adjust a focused handle; Shift moves in larger steps.</p><audio id="ref-trim-player" controls src="${url(aid)}"></audio><div class="row"><label class="field"><span>In point · seconds</span><input id="ref-trim-start" type="number" min="0" max="${a.duration}" step="0.01" value="${trim.start}"></label><label class="field"><span>Out point · seconds</span><input id="ref-trim-end" type="number" min="0" max="${a.duration}" step="0.01" value="${trim.end}"></label></div><button id="ref-trim-preview" class="small">▶ Preview selection</button><p id="ref-trim-duration" class="hint" role="status"></p><p class="hint">The original audio stays intact. Local and cloud generation use only this selection.</p>`,
+    '<button id="ref-trim-reset" class="small">Use full clip</button><button id="ref-trim-apply" class="primary">Apply to segment</button>',
+  );
+  const start = $("#ref-trim-start"),
+    end = $("#ref-trim-end"),
+    player = $("#ref-trim-player"),
+    apply = $("#ref-trim-apply"),
+    preview = $("#ref-trim-preview");
+  const valid = () =>
+    start.value !== "" &&
+    end.value !== "" &&
+    Number(start.value) >= 0 &&
+    Number(end.value) > Number(start.value) &&
+    Number(end.value) <= a.duration;
+  const track = $("#ref-trim-track"),
+    inHandle = $("#ref-trim-in-handle"),
+    outHandle = $("#ref-trim-out-handle");
+  const gap = Math.min(0.01, a.duration);
+  const update = () => {
+    player.pause();
+    apply.disabled = preview.disabled = !valid();
+    const from = Math.max(0, Math.min(a.duration, Number(start.value) || 0));
+    const to = Math.max(from, Math.min(a.duration, Number(end.value) || 0));
+    const left = (100 * from) / a.duration,
+      right = (100 * to) / a.duration;
+    inHandle.style.left = left + "%";
+    outHandle.style.left = right + "%";
+    $("#ref-trim-before").style.width = left + "%";
+    $("#ref-trim-after").style.width = 100 - right + "%";
+    $("#ref-trim-selection").style.left = left + "%";
+    $("#ref-trim-selection").style.width = right - left + "%";
+    for (const [handle, value, min, max] of [
+      [inHandle, from, 0, Math.max(0, to - gap)],
+      [outHandle, to, Math.min(a.duration, from + gap), a.duration],
+    ]) {
+      handle.setAttribute("aria-valuemin", min);
+      handle.setAttribute("aria-valuemax", max);
+      handle.setAttribute("aria-valuenow", value);
+      handle.setAttribute("aria-valuetext", value.toFixed(2) + " seconds");
+      handle.title = value.toFixed(2) + " seconds";
+    }
+    $("#ref-trim-duration").textContent = valid()
+      ? `${(Number(end.value) - Number(start.value)).toFixed(2)} seconds selected`
+      : "Choose an in point before the out point, within the recording.";
+  };
+  const moveHandle = (isStart, value) => {
+    const min = isStart
+      ? 0
+      : Math.min(a.duration, (Number(start.value) || 0) + gap);
+    const max = isStart
+      ? Math.max(0, (Number(end.value) || a.duration) - gap)
+      : a.duration;
+    const bounded = Math.max(min, Math.min(max, Math.round(value * 100) / 100));
+    (isStart ? start : end).value = bounded;
+    update();
+  };
+  for (const [handle, isStart] of [
+    [inHandle, true],
+    [outHandle, false],
+  ]) {
+    let dragging = false, dragX = 0, dragValue = 0;
+    const seek = (e) => {
+      const rect = track.getBoundingClientRect();
+      if (rect.width)
+        moveHandle(
+          isStart,
+          dragValue + ((e.clientX - dragX) / rect.width) * a.duration,
+        );
+    };
+    handle.onpointerdown = (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      handle.focus();
+      dragX = e.clientX;
+      dragValue = Number((isStart ? start : end).value);
+      dragging = true;
+      handle.setPointerCapture(e.pointerId);
+    };
+    handle.onpointermove = (e) => {
+      if (dragging) seek(e);
+    };
+    handle.onpointerup = (e) => {
+      if (!dragging) return;
+      seek(e);
+      dragging = false;
+      if (handle.hasPointerCapture(e.pointerId))
+        handle.releasePointerCapture(e.pointerId);
+    };
+    handle.onpointercancel = handle.onlostpointercapture = () => {
+      dragging = false;
+    };
+    handle.onkeydown = (e) => {
+      const current = Number((isStart ? start : end).value),
+        step = e.shiftKey ? 0.1 : 0.01;
+      const values = {
+        ArrowLeft: current - step,
+        ArrowDown: current - step,
+        ArrowRight: current + step,
+        ArrowUp: current + step,
+        Home: 0,
+        End: a.duration,
+      };
+      if (!(e.key in values)) return;
+      e.preventDefault();
+      moveHandle(isStart, values[e.key]);
+    };
+  }
+  start.oninput = end.oninput = update;
+  update();
+  preview.onclick = guard(async () => {
+    player.currentTime = Number(start.value);
+    await player.play();
+  });
+  let previewFrame = 0, previewTimer = 0;
+  const stopPreview = () => {
+    cancelAnimationFrame(previewFrame);
+    clearTimeout(previewTimer);
+  };
+  const checkPreview = () => {
+    if (player.paused) return;
+    if (player.currentTime >= Number(end.value)) {
+      player.pause();
+      player.currentTime = Number(end.value);
+      return;
+    }
+    previewFrame = requestAnimationFrame(checkPreview);
+  };
+  const scheduleStop = () => {
+    clearTimeout(previewTimer);
+    if (!player.paused) previewTimer = setTimeout(() => {
+      if (player.currentTime >= Number(end.value) - 0.01) {
+        player.pause(); player.currentTime = Number(end.value);
+      } else scheduleStop();
+    }, Math.max(10, (Number(end.value) - player.currentTime) / player.playbackRate * 1000));
+  };
+  player.onplay = () => {
+    if (!valid()) { player.pause(); return; }
+    stopPreview();
+    player.currentTime = Number(start.value);
+    previewFrame = requestAnimationFrame(checkPreview);
+    scheduleStop();
+  };
+  player.onpause = stopPreview;
+  player.onseeking = () => {
+    if (player.currentTime < Number(start.value)) player.currentTime = Number(start.value);
+    else if (player.currentTime > Number(end.value)) player.currentTime = Number(end.value);
+  };
+  player.onseeked = player.onratechange = scheduleStop;
+  player.ontimeupdate = () => {
+    if (!player.paused && player.currentTime >= Number(end.value)) {
+      player.pause(); player.currentTime = Number(end.value);
+    }
+  };
+  $("#modal").addEventListener("close", stopPreview, {once: true});
+  $("#ref-trim-reset").onclick = () => {
+    start.value = 0;
+    end.value = a.duration;
+    update();
+  };
+  apply.onclick = guard(async () => {
+    if (!valid()) return;
+    edit(() => {
+      seg.audio_trims = { ...(seg.audio_trims || {}) };
+      if (Number(start.value) === 0 && Number(end.value) === a.duration)
+        delete seg.audio_trims[aid];
+      else
+        seg.audio_trims[aid] = {
+          start: Number(start.value),
+          end: Number(end.value),
+        };
+    });
+    await syncRecovery();
+    player.pause();
+    $("#modal").close();
+    toast("Audio selection saved for this segment.");
+  });
+  $("#modal").addEventListener("close", () => player.pause(), { once: true });
+}
+
 function addReference(aid, shared = false, sc = scene(), seg = segment()) {
   const a = state.assets[aid];
   if (!a || !seg || !sc || !["image", "video", "audio"].includes(a.kind))
@@ -485,13 +908,19 @@ function addReference(aid, shared = false, sc = scene(), seg = segment()) {
 function renderTimeline() {
   const total = allSegments().reduce((n, s) => n + s.duration, 0);
   $("#timeline-length").textContent = fmt(total);
-  const width = Math.max(900, total * zoom + 180);
+  const viewport = $("#tracks-scroll").clientWidth || 600;
+  const extent = total + 3;
+  const barWidth = $("#timeline-range").clientWidth || viewport;
+  const maxZoom = Math.min(120, viewport / Math.min(extent, extent * 32 / barWidth));
+  zoom = Math.max(viewport / extent, Math.min(maxZoom, zoom));
+  const width = Math.max(viewport, extent * zoom);
   let offset = 0;
   $("#ruler").style.width = width + "px";
+  const tickStep = Math.max(1, Math.ceil(45 / zoom));
   $("#ruler").innerHTML = Array.from(
-    { length: Math.ceil(width / zoom) },
+    { length: Math.ceil(width / zoom / tickStep) },
     (_, i) =>
-      `<span class="tick" style="left:${i * zoom}px">${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}</span>`,
+      `<span class="tick" style="left:${i * tickStep * zoom}px">${String(Math.floor(i * tickStep / 60)).padStart(2, "0")}:${String(i * tickStep % 60).padStart(2, "0")}</span>`,
   ).join("");
   $("#scene-list").innerHTML = project.scenes
     .map(
@@ -499,20 +928,46 @@ function renderTimeline() {
         `<div class="scene-label ${sc.id === sceneId ? "active" : ""}" data-scene="${sc.id}"><span class="eyebrow">SCENE ${String(i + 1).padStart(2, "0")}</span><div class="row between"><b>${esc(sc.name)}</b><button data-scene-edit="${sc.id}" class="icon" title="Scene settings">⋯</button></div><span class="subtle" style="font-size:9px">${sc.segments.length} shots · ${fmt(sc.segments.reduce((n, s) => n + s.duration, 0))} · ${sc.refs.length} shared</span></div>`,
     )
     .join("");
-  $("#tracks").innerHTML = project.scenes
+  const timelineClips = project.scenes
     .map((sc) => {
-      let start = offset;
       let clips = sc.segments
         .map((s, i) => {
           let x = offset * zoom;
           offset += s.duration;
           let a = state.assets[s.main];
-          return `<div class="clip ${s.id === segmentId ? "active" : ""} ${selected.has(s.id) ? "selected" : ""}" style="left:${x}px;width:${Math.max(14, s.duration * zoom - 4)}px" data-segment="${s.id}" data-scene="${sc.id}" draggable="true" title="${esc(s.name)} · ${fmt(s.duration)}"><div class="clip-image" ${a?.thumbnail ? `style="background-image:url('${url(a.id, true)}')"` : ""}></div>${(s.connected && i > 0) || s.continuation ? `<div class="context-shade" style="width:${Math.min((s.overlap / 24) * zoom, s.duration * zoom * 0.4)}px"></div>` : ""}<div class="resize left" data-edge="left"></div><div class="clip-content"><b>${esc(s.name)}</b><span class="clip-meta">${s.type === "video" ? "▶ Imported video" : a ? "▶ Main take" : "✦ Prompt segment"}${s.connected && i > 0 ? " · ↔ " + s.overlap + "f" : ""}</span></div><span class="clip-duration">${fmt(s.duration)}</span><div class="resize right" data-edge="right"></div></div>`;
+          const source = motionSource(s);
+          const refs = orderedReferences(sc, s).map(aid => state.assets[aid]).filter(Boolean);
+          const refIcons = refs.map(ref => ref.kind === "image" || ref.thumbnail
+            ? `<img src="${url(ref.id, ref.kind !== "image")}" alt="${esc(ref.name)}" loading="lazy">`
+            : `<span title="${esc(ref.name)}">${ref.kind === "audio" ? "♫" : "▶"}</span>`).join("");
+          const insert = x > 0 ? `<button class="insert-between" data-insert-before="${s.id}" data-insert-scene="${sc.id}" style="left:${x - 2}px" aria-label="Insert blank segment before ${esc(s.name)}" title="Insert blank segment">＋</button>` : "";
+          return `${insert}<div class="clip ${s.id === segmentId ? "active" : ""} ${selected.has(s.id) ? "selected" : ""}" style="left:${x}px;width:${Math.max(14, s.duration * zoom - 4)}px" data-segment="${s.id}" data-scene="${sc.id}" draggable="true" title="${esc(sc.name)} / ${esc(s.name)} · ${fmt(s.duration)}${source ? " · Motion from " + esc(source.name) : ""}"><div class="clip-image" ${a?.thumbnail ? `style="background-image:url('${url(a.id, true)}')"` : ""}></div>${source || s.continuation ? `<div class="context-shade" style="width:${Math.min((s.overlap / 24) * zoom, s.duration * zoom * 0.4)}px"></div>` : ""}<div class="resize left" data-edge="left"></div><div class="clip-content"><span class="clip-scene">${esc(sc.name)}</span><b>${esc(s.name)}</b><span class="clip-meta">${s.type === "video" ? "▶ Imported video" : a ? "▶ Main take" : "✦ Prompt segment"}${source ? " · ↔ " + esc(source.name) + " · " + s.overlap + "f" : ""}</span></div><div class="clip-references">${refIcons}</div><span class="clip-duration">${fmt(s.duration)}</span><div class="resize right" data-edge="right"></div></div>`;
         })
         .join("");
-      return `<div class="track" data-scene="${sc.id}" style="width:${width}px">${clips}<button class="add-on-track" data-track-add="${sc.id}" style="left:${offset * zoom + 8}px" title="Add segment">＋</button></div>`;
+      return clips;
     })
     .join("");
+  const endScene = project.scenes.at(-1)?.id || sceneId;
+  $("#tracks").innerHTML = `<div class="track single-track" data-scene="${endScene || ""}" style="width:${width}px">${timelineClips}<button class="add-on-track" data-track-add="${endScene || ""}" style="left:${offset * zoom + 8}px" title="Add segment">＋</button></div>`;
+  const track = $("#tracks .single-track");
+  const insertButtons = $$(".insert-between", track);
+  track.onpointermove = event => {
+    const x = event.clientX - track.getBoundingClientRect().left;
+    let nearest = null, distance = 16;
+    for (const button of insertButtons) {
+      const d = Math.abs(parseFloat(button.style.left) - x);
+      if (d < distance) { nearest = button; distance = d; }
+    }
+    for (const button of insertButtons) button.classList.toggle("visible", button === nearest);
+  };
+  track.onpointerleave = () => insertButtons.forEach(button => button.classList.remove("visible"));
+  for (const button of insertButtons) {
+    button.onpointerdown = event => event.stopPropagation();
+    button.onclick = event => {
+      event.stopPropagation();
+      insertBlankSegment(button.dataset.insertScene, button.dataset.insertBefore);
+    };
+  }
   $$(".scene-label").forEach(
     (el) =>
       (el.onclick = (e) => {
@@ -647,15 +1102,35 @@ function renderTimeline() {
   });
   $("#undo").disabled = !undo.length;
   $("#redo").disabled = !redo.length;
+  syncTimelineRange();
 }
-$("#tracks-scroll").addEventListener("scroll", () => {
-  $("#scene-list").scrollTop = $("#tracks-scroll").scrollTop;
-});
-$("#scene-list").addEventListener("scroll", () => {
-  $("#tracks-scroll").scrollTop = $("#scene-list").scrollTop;
-});
+function pinMotionLinks() {
+  for (const seg of allSegments()) {
+    const source = motionSource(seg);
+    if (source && seg.connected) {
+      seg.continuation_segment = source.id;
+      seg.connected = false;
+    }
+  }
+}
+function insertBlankSegment(targetSceneId, beforeId) {
+  const target = project.scenes.find(sc => sc.id === targetSceneId);
+  const index = target?.segments.findIndex(seg => seg.id === beforeId) ?? -1;
+  if (index < 0) return;
+  edit(() => {
+    // Inserting a blank shot must not redirect existing motion chains to it.
+    pinMotionLinks();
+    sceneId = target.id;
+    const blank = newSegment();
+    blank.connected = false;
+    target.segments.splice(index, 0, blank);
+    segmentId = blank.id;
+    selected = new Set([blank.id]);
+  });
+}
 function moveSegment(gid, targetId, before) {
   edit(() => {
+    pinMotionLinks();
     let old = project.scenes.find((sc) =>
       sc.segments.some((s) => s.id === gid),
     );
@@ -721,7 +1196,7 @@ function encodedContext(s) {
 async function encodeSelectedSegment() {
   const s = segment();
   if (!s?.main) throw Error("Choose a main video first.");
-  await save();
+  await syncRecovery();
   await api(`/api/assets/${s.main}/encode`, {
     project_id: project.id,
     segment_id: s.id,
@@ -736,7 +1211,8 @@ function addContinuation() {
   edit(() => {
     const s = newSegment();
     s.name = previous.name + " · continuation";
-    s.connected = true;
+    s.connected = false;
+    s.continuation_segment = previous.id;
     sc.segments.splice(sc.segments.indexOf(previous) + 1, 0, s);
     segmentId = s.id;
     selected = new Set([s.id]);
@@ -943,6 +1419,7 @@ function showScene() {
     };
   $("#scene-delete").onclick = () => {
     edit(() => {
+      detachMotionLinks(sc.segments.map(s => s.id));
       project.scenes = project.scenes.filter((s) => s.id !== sc.id);
       sceneId = project.scenes[0]?.id;
       segmentId = scene()?.segments[0]?.id;
@@ -953,22 +1430,33 @@ function showScene() {
 async function showAsset(aid) {
   const a = state.assets[aid];
   if (!a) return;
+  const existingFolders = [...new Set(Object.values(state.assets).map(asset => asset.folder).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+
   const source =
     a.kind === "image"
       ? `<img class="detail-preview" src="${url(aid)}" alt="${esc(a.name)}">`
       : `<${a.kind === "audio" ? "audio" : "video"} id="asset-player" controls src="${url(aid)}"></${a.kind === "audio" ? "audio" : "video"}>`;
   modal(
     a.name,
-    `${source}<div class="row"><label class="field"><span>Name</span><input id="asset-name" value="${esc(a.name)}"></label><label class="field"><span>Folder / collection</span><input id="asset-folder" value="${esc(a.folder)}" placeholder="Characters / Maya"></label></div><label class="field"><span>Tags, separated by commas</span><input id="asset-tags" value="${esc(a.tags.join(", "))}" placeholder="character, close-up, wardrobe"></label>${a.kind === "audio" ? `${wave(a, true)}<div class="row"><label class="field"><span>Trim in (seconds)</span><input id="trim-start" type="number" min="0" max="${a.duration}" step="0.01" value="0"></label><label class="field"><span>Trim out (seconds)</span><input id="trim-end" type="number" min="0" max="${a.duration}" step="0.01" value="${a.duration}"></label></div><div class="row"><button id="preview-trim" class="small">▶ Preview selection</button><button id="trim-save" class="small">Save trimmed copy</button></div><p class="hint">Trimming makes a new asset and preserves the original recording.</p>` : ""}${a.kind === "video" ? `<div class="row"><button id="add-video-timeline" class="primary small">＋ Add to timeline</button><button id="use-main" class="small">Use as main video</button><button id="encode-latent" class="small">◇ Encode latents</button></div><p class="hint">Encoding uses your project's ${project.width} × ${project.height} resolution at 24 fps. ${a.latent ? "Latent available" + (a.latent.downloaded ? " locally and on ComfyUI." : " on ComfyUI.") : "Encode this video to continue its motion in a new segment."}</p>` : ""}<div class="row" style="margin-top:20px"><button id="detail-add-ref" class="small">＋ Add as reference</button><a href="${url(aid)}" download="${esc(a.name)}${esc(a.file.slice(a.file.lastIndexOf(".")))}">Download original ↗</a></div>`,
+    `${source}<div class="row"><label class="field"><span>Name</span><input id="asset-name" value="${esc(a.name)}"></label><div class="field"><label class="field-label" for="asset-folder-existing">Existing folder</label><select id="asset-folder-existing"><option value="" disabled ${a.folder ? '' : 'selected'}>Choose an existing folder…</option>${existingFolders.map(f=>`<option value="${esc(f)}" ${f===a.folder?'selected':''}>${esc(f)}</option>`).join('')}</select><label class="field-label" for="asset-folder">Folder / collection</label><input id="asset-folder" value="${esc(a.folder)}" placeholder="Type a new folder, e.g. Characters / Maya"></div></div><label class="field"><span>Tags, separated by commas</span><input id="asset-tags" value="${esc(a.tags.join(", "))}" placeholder="character, close-up, wardrobe"></label>${a.kind === "image" ? `<label class="field"><span>Image description</span><textarea id="asset-description" rows="6" placeholder="Describe this reference, or generate a description with your connected LLM…">${esc(a.description || "")}</textarea></label><button id="describe-image" class="small">✦ Describe image</button><p class="hint" id="describe-status" role="status">Uses the model configured in Scene Writer. It must support image input. Generated descriptions are saved automatically; edits use Save asset details.</p>` : ""}${a.kind === "audio" ? `${wave(a, true)}<div class="row"><label class="field"><span>Trim in (seconds)</span><input id="trim-start" type="number" min="0" max="${a.duration}" step="0.01" value="0"></label><label class="field"><span>Trim out (seconds)</span><input id="trim-end" type="number" min="0" max="${a.duration}" step="0.01" value="${a.duration}"></label></div><div class="row"><button id="preview-trim" class="small">▶ Preview selection</button><button id="trim-save" class="small">Save trimmed copy</button></div><p class="hint">Trimming makes a new asset and preserves the original recording.</p>` : ""}${a.kind === "video" ? `<div class="row"><button id="add-video-timeline" class="primary small">＋ Add to timeline</button><button id="use-main" class="small">Use as main video</button><button id="encode-latent" class="small">◇ Encode latents</button></div><p class="hint">Encoding uses your project's ${project.width} × ${project.height} resolution at 24 fps. ${a.latent ? "Latent available" + (a.latent.downloaded ? " locally and on ComfyUI." : " on ComfyUI.") : "Encode this video to continue its motion in a new segment."}</p>` : ""}<div class="row" style="margin-top:20px"><button id="detail-add-ref" class="small">＋ Add as reference</button><a href="${url(aid)}" download="${esc(a.name)}${esc(a.file.slice(a.file.lastIndexOf(".")))}">Download original ↗</a></div>`,
     '<button id="asset-save" class="primary">Save asset details</button>',
     "ASSET LIBRARY",
   );
+  $("#asset-folder-existing").onchange = e => {
+    $("#asset-folder").value = e.target.value;
+  };
+  $("#asset-folder").oninput = e => {
+    $("#asset-folder-existing").value = existingFolders.includes(e.target.value) ? e.target.value : "";
+  };
   $("#asset-save").onclick = guard(async () => {
     const result = await api(
       "/api/assets/" + aid,
       {
         name: $("#asset-name").value,
         folder: $("#asset-folder").value,
+        ...(a.kind === "image"
+          ? { description: $("#asset-description").value }
+          : {}),
         tags: $("#asset-tags")
           .value.split(",")
           .map((s) => s.trim())
@@ -980,6 +1468,32 @@ async function showAsset(aid) {
     renderAll();
     $("#modal").close();
   });
+  if (a.kind === "image") {
+    const button = $("#describe-image"),
+      field = $("#asset-description"),
+      status = $("#describe-status"),
+      saveButton = $("#asset-save");
+    button.onclick = guard(async () => {
+      button.disabled = true;
+      field.disabled = true;
+      saveButton.disabled = true;
+      status.textContent = "Describing image…";
+      try {
+        const result = await api(`/api/assets/${aid}/describe`, {});
+        if (state.assets[aid])
+          state.assets[aid].description = result.description;
+        field.value = result.description;
+        status.textContent =
+          "Description saved. You can edit it and save asset details.";
+      } catch (error) {
+        status.textContent = error.message;
+      } finally {
+        button.disabled = false;
+        field.disabled = false;
+        saveButton.disabled = false;
+      }
+    });
+  }
   $("#detail-add-ref").onclick = guard(() => addReference(aid));
   if (a.kind === "video") {
     $("#add-video-timeline").onclick = guard(() => {
@@ -999,7 +1513,7 @@ async function showAsset(aid) {
       $("#modal").close();
     };
     $("#encode-latent").onclick = guard(async () => {
-      await save();
+      await syncRecovery();
       await api(`/api/assets/${aid}/encode`, { project_id: project.id });
       toast("Latent encoding queued.");
       toast("Encoding queued.");
@@ -1036,9 +1550,16 @@ async function showAsset(aid) {
 }
 async function showSettings() {
   const settings = state.settings;
+  let hosting;
+  try {
+    hosting = await api("/api/hosting");
+  } catch (error) {
+    if (error.status !== 404) throw error;
+    hosting = {supported: false, lan: false, needsRestart: true};
+  }
   modal(
     "Local studio settings",
-    `<label class="field"><span>Project name</span><input id="settings-project" value="${esc(project.name)}"></label><div class="row"><label class="field"><span>Project width · multiple of 32</span><input id="settings-width" type="number" min="32" step="32" value="${project.width}"></label><label class="field"><span>Project height · multiple of 32</span><input id="settings-height" type="number" min="32" step="32" value="${project.height}"></label></div><div class="row"><label class="field"><span>Target megapixels</span><input id="settings-mp" type="number" min="0.01" max="16.77" step="0.1" value="${((project.width * project.height) / 1e6).toFixed(2)}"></label><button id="apply-mp" class="small">Apply MP</button></div><p class="hint" id="mp-result">Uses the current width-to-height ratio; dimensions round to multiples of 32.</p><label class="field"><span>ComfyUI address</span><input id="comfy-url" value="${esc(settings.comfy_url)}" placeholder="http://127.0.0.1:8188"></label><div class="row"><button id="test-connection" class="small">Test connection & discover models</button><span id="connection-result" class="hint"></span></div><details><summary>Model filenames</summary>${Object.entries(
+    `<h3>Network access</h3><label class="check"><input id="hosting-lan" type="checkbox" ${hosting.lan ? "checked" : ""} ${hosting.supported ? "" : "disabled"}> LAN access</label><p class="hint">Off: local only. On: devices on your LAN can open this editor. Changes apply immediately and are remembered. LAN access has no sign-in; use a trusted network.</p><p id="hosting-status" class="hint" role="status"></p><label class="field"><span>Project name</span><input id="settings-project" value="${esc(project.name)}"></label><div class="row"><label class="field"><span>Project width · multiple of 32</span><input id="settings-width" type="number" min="32" step="32" value="${project.width}"></label><label class="field"><span>Project height · multiple of 32</span><input id="settings-height" type="number" min="32" step="32" value="${project.height}"></label></div><div class="row"><label class="field"><span>Target megapixels</span><input id="settings-mp" type="number" min="0.01" max="16.77" step="0.1" value="${((project.width * project.height) / 1e6).toFixed(2)}"></label><button id="apply-mp" class="small">Apply MP</button></div><p class="hint" id="mp-result">Uses the current width-to-height ratio; dimensions round to multiples of 32.</p><label class="field"><span>ComfyUI address</span><input id="comfy-url" value="${esc(settings.comfy_url)}" placeholder="http://127.0.0.1:8188"></label><div class="row"><button id="test-connection" class="small">Test connection & discover models</button><span id="connection-result" class="hint"></span></div><details><summary>Model filenames</summary>${Object.entries(
       settings.models,
     )
       .filter(([k]) => k !== "ltx_identity_lora")
@@ -1051,6 +1572,27 @@ async function showSettings() {
       )}</details><h3>Portable library</h3><p class="hint">Projects, references, generated takes, and downloaded latents live together. Download a library backup, then extract it into a new data folder and start the editor with that folder.</p><a href="/api/backup" download>Download complete library backup ↗</a>`,
     '<button id="settings-save" class="primary">Save settings</button>',
   );
+  const renderHosting = () => {
+    $("#hosting-status").textContent = !hosting.supported
+      ? (hosting.needsRestart ? "Restart the editor after active jobs finish to enable network access controls." : "Start with run.py to change network access here.")
+      : hosting.lan
+        ? "LAN access enabled. " + (hosting.urls.join(" · ") || "Use this computer’s LAN IP and app port.")
+        : "Local only · " + hosting.local_url;
+  };
+  renderHosting();
+  $("#hosting-lan").onchange = guard(async () => {
+    const toggle = $("#hosting-lan");
+    toggle.disabled = true;
+    try {
+      hosting = await api("/api/hosting", {lan: toggle.checked}, "PUT");
+      renderHosting();
+      if (!hosting.lan && !["localhost", "127.0.0.1", "[::1]"].includes(location.hostname))
+        $("#hosting-status").textContent = "Local only enabled. This device will disconnect. Open " + hosting.local_url + " on the host computer.";
+    } finally {
+      toggle.checked = hosting.lan;
+      toggle.disabled = false;
+    }
+  });
   $("#test-connection").onclick = guard(async () => {
     const b = $("#test-connection");
     b.disabled = true;
@@ -1125,7 +1667,7 @@ async function showSettings() {
         s.height = height;
       });
     });
-    await save();
+    await syncRecovery();
     $("#modal").close();
     checkConnection();
     toast("Settings saved.");
@@ -1133,7 +1675,7 @@ async function showSettings() {
 }
 function jobsHTML() {
   let jobs = [...state.jobs].reverse();
-  return `<div class="stat-grid"><div class="stat"><strong>${jobs.filter((j) => activeStatuses.includes(j.status)).length}</strong><span>Active & queued</span></div><div class="stat"><strong>${jobs.filter((j) => j.status === "completed").length}</strong><span>Completed</span></div><div class="stat"><strong>${connectionState?.stats?.devices?.[0] ? Math.round(connectionState.stats.devices[0].vram_free / 1024 ** 3) + " GB" : "—"}</strong><span>Free GPU memory</span></div></div>${connectionState?.stats?.devices?.[0] ? `<p class="hint">${esc(connectionState.stats.devices[0].name)}</p>` : ""}<div id="job-list">${jobs.map((j) => `<article class="job"><div class="row between"><span class="job-name">${esc(j.name)}</span><span class="badge ${j.status}">${j.status}</span></div><div class="job-details">${esc(j.stage || "")} · ${j.started ? Math.round((j.finished || Date.now() / 1000) - j.started) + "s elapsed" : new Date(j.created * 1000).toLocaleTimeString()}${j.spec?.seed !== undefined ? "<br>Seed " + esc(j.spec.seed) : ""}${j.prompt_id ? "<br>Prompt " + esc(j.prompt_id) : ""}</div>${activeStatuses.includes(j.status) ? `<div class="progress"><div style="width:${j.progress ?? 3}%"></div></div>` : ""}${j.error ? `<div class="job-error">${esc(j.error)}</div>` : ""}<div class="row" style="margin-top:10px">${activeStatuses.includes(j.status) && j.kind !== "export" ? `<button data-cancel-job="${j.id}" class="small danger">Cancel job</button>` : ""}${j.download ? `<a href="${esc(j.download)}" download>Download export ↗</a>` : ""}${j.prompt_id ? `<a href="/api/jobs/${j.id}/graph" download class="subtle" style="font-size:10px">Workflow JSON</a>` : ""}${(j.results || []).map((aid) => `<button class="small" data-result="${aid}">Open ${state.assets[aid]?.kind || "asset"}</button>`).join("")}</div></article>`).join("") || '<div class="empty-assets"><b>Your queue is clear</b>Queue one shot or an entire scene.<br>Generations run one at a time to fit consumer hardware.</div>'}</div>`;
+  return `<div class="stat-grid"><div class="stat"><strong>${jobs.filter((j) => activeStatuses.includes(j.status)).length}</strong><span>Active & queued</span></div><div class="stat"><strong>${jobs.filter((j) => j.status === "completed").length}</strong><span>Completed</span></div><div class="stat"><strong>${connectionState?.stats?.devices?.[0] ? Math.round(connectionState.stats.devices[0].vram_free / 1024 ** 3) + " GB" : "—"}</strong><span>Free GPU memory</span></div></div>${connectionState?.stats?.devices?.[0] ? `<p class="hint">${esc(connectionState.stats.devices[0].name)}</p>` : ""}<div id="job-list">${jobs.map((j) => `<article class="job"><div class="row between"><span class="job-name">${esc(j.name)}${j.inference === "cloud" ? " · Cloud Add Guide" : ""}</span><span class="badge ${j.status}">${j.status}</span></div><div class="job-details">${esc(j.stage || "")} · ${j.started ? Math.round((j.finished || Date.now() / 1000) - j.started) + "s elapsed" : new Date(j.created * 1000).toLocaleTimeString()}${j.spec?.seed !== undefined ? "<br>Seed " + esc(j.spec.seed) : ""}${j.prompt_id ? "<br>Prompt " + esc(j.prompt_id) : ""}</div>${activeStatuses.includes(j.status) ? `<div class="progress"><div style="width:${j.progress ?? 3}%"></div></div>` : ""}${j.error ? `<div class="job-error">${esc(j.error)}</div>` : ""}<div class="row" style="margin-top:10px">${activeStatuses.includes(j.status) && j.kind !== "export" ? `<button data-cancel-job="${j.id}" class="small danger">Cancel job</button>` : ""}${j.download ? `<a href="${esc(j.download)}" download>Download export ↗</a>` : ""}${j.prompt_id ? `<a href="/api/jobs/${j.id}/graph" download class="subtle" style="font-size:10px">Workflow JSON</a>` : ""}${(j.results || []).map((aid) => `<button class="small" data-result="${aid}">Open ${state.assets[aid]?.kind || "asset"}</button>`).join("")}</div></article>`).join("") || '<div class="empty-assets"><b>Your queue is clear</b>Queue one shot or an entire scene.<br>Generations run one at a time to fit consumer hardware.</div>'}</div>`;
 }
 function showJobs() {
   modal(
@@ -1231,14 +1773,30 @@ function showSpeech() {
 function showExport() {
   const segs = allSegments();
   const missing = segs.filter((s) => !s.main);
+  const shortened = segs.filter(
+    (s) =>
+      state.assets[s.main] &&
+      state.assets[s.main].duration - (s.trim_in || 0) + 0.005 < s.duration,
+  );
+  const availableDuration = (s) =>
+    Math.max(
+      0,
+      Math.min(
+        Math.round(s.duration * 24),
+        Math.floor(
+          ((state.assets[s.main]?.duration || 0) - (s.trim_in || 0) + 0.005) *
+            24,
+        ),
+      ) / 24,
+    );
   modal(
     "Export your film",
-    `<p class="speech-intro">${esc(project.name)} · ${segs.length} segments · ${fmt(segs.reduce((n, s) => n + s.duration, 0))}<br>${project.width} × ${project.height} · 24 fps · H.264 with AAC audio</p>${missing.length ? `<div class="callout">${missing.length} segments need a main video before export: ${missing.map((s) => esc(s.name)).join(", ")}</div>` : ""}<div class="export-options"><button class="export-option" data-export="video"><span class="large-icon">▻</span><b>Finished video</b><p>One MP4, all scenes and shots in timeline order. Context is already trimmed.</p></button><button class="export-option" data-export="clips"><span class="large-icon">▤</span><b>Individual clips</b><p>A ZIP of trimmed, numbered MP4 clips with a scene and prompt manifest.</p></button></div><p class="hint" style="margin-top:20px">Clips are normalized to the project resolution and frame rate. Source in points and timeline lengths are respected. Missing or short source media stops export with a clear error.</p>`,
+    `<p class="speech-intro">${esc(project.name)} · ${segs.length} segments · ${fmt(segs.reduce((n, s) => n + s.duration, 0))}<br>${project.width} × ${project.height} · 24 fps · H.264 with AAC audio</p>${shortened.length ? `<div class="callout">${shortened.length} selected takes are shorter than their timeline segments. Export uses available footage after each in-point, without padding. Estimated export: ${fmt(segs.reduce((n, s) => n + availableDuration(s), 0))}.</div>` : ""}${missing.length ? `<div class="callout">${missing.length} segments need a main video before export: ${missing.map((s) => esc(s.name)).join(", ")}</div>` : ""}<div class="export-options"><button class="export-option" data-export="video"><span class="large-icon">▻</span><b>Finished video</b><p>One MP4, all scenes and shots in timeline order. Context is already trimmed.</p></button><button class="export-option" data-export="clips"><span class="large-icon">▤</span><b>Individual clips</b><p>A ZIP of trimmed, numbered MP4 clips with a scene and prompt manifest.</p></button></div><p class="hint" style="margin-top:20px">Clips are normalized to the project resolution and frame rate. Source in points and timeline lengths are respected. Shorter takes export their available footage. Missing media or in-points beyond the end still need correction.</p>`,
   );
   $$("[data-export]").forEach(
     (b) =>
       (b.onclick = guard(async () => {
-        await save();
+        await syncRecovery();
         await api("/api/export", {
           project_id: project.id,
           mode: b.dataset.export,
@@ -1248,9 +1806,53 @@ function showExport() {
       })),
   );
 }
+async function showCloudSetup() {
+  const config = await api("/api/cloud/config");
+  modal(
+    "Comfy Cloud inference",
+    `<p class="hint">Enable Cloud inference beside Queue selected to send timeline prompts and reference media to your Comfy Cloud account. Cloud credits apply. For a comparison, disable automatic seed randomization and queue the same segment once locally and once with Cloud inference. Turn it off to use your local installation.</p><label class="field"><span>Comfy Cloud API key</span><input id="cloud-key" type="password" autocomplete="off" placeholder="${config.has_api_key ? "Key saved · leave blank to keep" : "Paste your Comfy API key"}"></label><label><input id="cloud-clear" type="checkbox"> Remove saved key</label><p class="hint">The key stays on this editor server and is excluded from library exports. Cloud uses native H3 Add Guide with the previous video’s tail and audio. The overlap prefix is removed automatically. Local generation keeps its saved-latent workflow. Cloud takes retain their videos, not custom H3 latents. Model filenames come from Settings.</p><p><a href="https://platform.comfy.org" target="_blank" rel="noopener">Get a Comfy API key ↗</a></p><p id="cloud-result" class="hint" role="status"></p>`,
+    '<button id="cloud-save" class="primary">Save key</button><button id="cloud-test" class="small">Test connection</button>',
+  );
+  const saveKey = async () => {
+    const value = await api(
+      "/api/cloud/config",
+      { api_key: $("#cloud-key").value, clear_key: $("#cloud-clear").checked },
+      "PUT",
+    );
+    $("#cloud-key").value = "";
+    $("#cloud-clear").checked = false;
+    $("#cloud-key").placeholder = value.has_api_key
+      ? "Key saved · leave blank to keep"
+      : "Paste your Comfy API key";
+    $("#cloud-result").textContent = value.has_api_key
+      ? "Key saved."
+      : "Key removed.";
+  };
+  $("#cloud-save").onclick = guard(saveKey);
+  $("#cloud-test").onclick = guard(async () => {
+    await saveKey();
+    $("#cloud-result").textContent =
+      "Checking cloud connection and workflow support…";
+    const result = await api("/api/cloud/test", {});
+    $("#cloud-result").textContent = result.warning;
+  });
+}
+$("#cloud-setup").onclick = guard(showCloudSetup);
+$("#cloud-inference").onchange = guard(async () => {
+  if ($("#cloud-inference").checked) {
+    const config = await api("/api/cloud/config");
+    if (!config.has_api_key) await showCloudSetup();
+  }
+});
+
 async function queue(ids) {
-  await save();
-  await api("/api/queue", { project_id: project.id, segment_ids: ids });
+  await syncRecovery();
+  await api("/api/queue", {
+    project_id: project.id,
+    segment_ids: ids,
+    inference: $("#cloud-inference").checked ? "cloud" : "local",
+    turbo: $("#turbo").checked,
+  });
   toast(`${ids.length} generation${ids.length > 1 ? "s" : ""} queued.`);
   await refresh();
   // The queue badge reflects pending work without interrupting editing.
@@ -1416,7 +2018,7 @@ function setupPanelResize() {
   const definitions = [
     [".library", "library", "vertical", 1, 180, 500],
     [".inspector", "inspector", "vertical", -1, 240, 600],
-    [".timeline", "timeline", "horizontal", -1, 160, 650],
+    [".timeline", "timeline", "horizontal", -1, 274, 650],
     [".scene-list", "scenes", "vertical", 1, 120, 360],
     [".inspector", "inspector-height", "horizontal", 1, 200, 900],
   ];
@@ -1544,6 +2146,36 @@ $$("[data-kind]").forEach(
 );
 $("#settings-btn").onclick = showSettings;
 $("#connection").onclick = showSettings;
+$("#scene-writer-btn").onclick = guard(() => openSceneWriter());
+function openSceneWriter(target = null) {
+  return showSceneWriter({
+    targetSegment: target ? clone(target) : null,
+    targetRefs: target ? orderedReferences(scene(), target).filter(aid => state.assets[aid]?.kind === "image") : [],
+    $,
+    api,
+    esc,
+    modal,
+    toast,
+    save: syncRecovery,
+    importFiles,
+    getProject: () => project,
+    getAssets: () => state.assets,
+    onApproved: async (result) => {
+      project = clone(result.project);
+      savedProject = clone(project);
+      state.projects[project.id] = clone(project);
+      sceneId = result.scene_id;
+      segmentId = result.segment_id || scene().segments[0]?.id;
+      selected = new Set(segmentId ? [segmentId] : []);
+      dirty = false;
+      undo = [];
+      redo = [];
+      localStorage.removeItem("frameforge-unsaved");
+      $("#modal").close();
+      renderAll();
+    },
+  });
+}
 $("#speech-btn").onclick = showSpeech;
 $("#jobs-btn").onclick = showJobs;
 $("#export-btn").onclick = showExport;
@@ -1630,10 +2262,69 @@ $("#capture-btn").onclick = guard(async () => {
   renderAssets();
   toast("Frame saved as an image reference.");
 });
-$("#zoom").oninput = (e) => {
-  zoom = Number(e.target.value);
+function timelineRangeState() {
+  const scroll = $("#tracks-scroll");
+  const duration = allSegments().reduce((sum, seg) => sum + seg.duration, 0) + 3;
+  const start = Math.min(duration, scroll.scrollLeft / zoom);
+  return {start, end: Math.min(duration, start + scroll.clientWidth / zoom), duration};
+}
+function syncTimelineRange() {
+  if (!project) return;
+  const {start, end, duration} = timelineRangeState();
+  const bar = $("#timeline-window");
+  bar.style.left = `${start / duration * 100}%`;
+  bar.style.width = `${(end - start) / duration * 100}%`;
+  bar.setAttribute("aria-valuemin", 0);
+  bar.setAttribute("aria-valuemax", duration);
+  bar.setAttribute("aria-valuenow", start);
+  bar.setAttribute("aria-valuetext", `${fmt(start)} to ${fmt(end)}`);
+  for (const grip of $$(".range-grip", bar)) {
+    const left = grip.dataset.rangeEdge === "left";
+    grip.setAttribute("aria-valuemin", left ? 0 : start);
+    grip.setAttribute("aria-valuemax", left ? end : duration);
+    grip.setAttribute("aria-valuenow", left ? start : end);
+    grip.setAttribute("aria-valuetext", fmt(left ? start : end));
+  }
+}
+function setTimelineRange(range) {
+  zoom = $("#tracks-scroll").clientWidth / (range.end - range.start);
   renderTimeline();
+  $("#tracks-scroll").scrollLeft = range.start * zoom;
+  syncTimelineRange();
+}
+const rangeBar = $("#timeline-window");
+rangeBar.onpointerdown = (event) => {
+  if (event.button !== 0 || !project) return;
+  event.preventDefault();
+  const edge = event.target.closest("[data-range-edge]")?.dataset.rangeEdge || "pan";
+  const initial = timelineRangeState();
+  const width = $("#timeline-range").clientWidth;
+  const minimum = Math.max($("#tracks-scroll").clientWidth / 120, initial.duration * 32 / width);
+  const x = event.clientX;
+  rangeBar.setPointerCapture(event.pointerId);
+  rangeBar.classList.add("dragging");
+  const move = e => setTimelineRange(changeTimelineRange(initial.start, initial.end, edge,
+    (e.clientX - x) / width * initial.duration, initial.duration, minimum));
+  const stop = () => {
+    rangeBar.removeEventListener("pointermove", move);
+    rangeBar.removeEventListener("lostpointercapture", stop);
+    rangeBar.classList.remove("dragging");
+  };
+  rangeBar.addEventListener("pointermove", move);
+  rangeBar.addEventListener("lostpointercapture", stop);
 };
+rangeBar.onkeydown = event => {
+  if (!project || !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+  event.preventDefault();
+  const current = timelineRangeState();
+  const edge = event.target.dataset.rangeEdge || "pan";
+  const step = (current.end - current.start) * (event.shiftKey ? .1 : .02);
+  setTimelineRange(changeTimelineRange(current.start, current.end, edge,
+    event.key === "ArrowLeft" ? -step : step, current.duration,
+    Math.max($("#tracks-scroll").clientWidth / 120, current.duration * 32 / $("#timeline-range").clientWidth)));
+};
+$("#tracks-scroll").addEventListener("scroll", syncTimelineRange);
+new ResizeObserver(() => { if (project) { renderTimeline(); } }).observe($("#tracks-scroll"));
 function historyStep(forward) {
   const source = forward ? redo : undo,
     target = forward ? undo : redo;
@@ -1648,7 +2339,7 @@ $("#undo").onclick = () => historyStep(false);
 $("#redo").onclick = () => historyStep(true);
 $("#project-select").onchange = guard(async (e) => {
   const pid = e.target.value;
-  await save();
+  await syncRecovery();
   project = clone(state.projects[pid]);
   savedProject = clone(project);
   sceneId = project.scenes[0]?.id;
@@ -1658,20 +2349,24 @@ $("#project-select").onchange = guard(async (e) => {
   redo = [];
   localStorage.setItem("frameforge-project", pid);
   renderAll();
+  offerRecovery();
 });
+$("#save-project").onclick = guard(() => manualSave());
+$("#save-as-project").onclick = showSaveAs;
 $("#manage-projects").onclick = () => {
   modal(
     "Saved projects",
-    `<label class="field"><span>Project name</span><input id="rename-project" value="${esc(project.name)}"></label><div class="row"><button id="rename-save" class="small">Rename</button><button id="project-download" class="small">Export project</button><button id="project-import" class="small">Import project</button><button id="project-delete" class="small danger">Delete project</button></div><input id="project-file" type="file" accept=".zip" hidden><p class="hint">Project archives include media, takes, and saved latents. Deleting a project keeps its media in the asset library.</p>`,
+    `<label class="field"><span>Project name</span><input id="rename-project" value="${esc(project.name)}"></label><div class="row"><button id="rename-save" class="small">Rename</button><button id="project-download" class="small">Export project</button><button id="project-import" class="small">Import project</button><button id="project-revert" class="small">Return to saved version</button><button id="project-delete" class="small danger">Delete project</button></div><input id="project-file" type="file" accept=".zip" hidden><p class="hint">Project archives include media, takes, and saved latents. Deleting a project keeps its media in the asset library.</p>`,
   );
+  $("#project-revert").onclick = () => { if (hasUnfinalizedChanges()) offerRecovery(); else toast("This project matches its saved version."); };
   $("#rename-save").onclick = guard(async () => {
     edit(() => (project.name = $("#rename-project").value), false);
-    await save();
+    await syncRecovery();
     renderHeader();
-    toast("Project renamed.");
+    toast("Working project renamed. Use Save to finalize it.");
   });
   $("#project-download").onclick = guard(async () => {
-    await save();
+    await syncRecovery();
     const a = document.createElement("a");
     a.href = `/api/projects/${project.id}/export`;
     a.download = "frameforge-project.zip";
@@ -1694,7 +2389,7 @@ $("#manage-projects").onclick = () => {
   };
   $("#project-file").onchange = guard(async (e) => {
     if (!e.target.files.length) return;
-    await save();
+    await syncRecovery();
     const form = new FormData();
     form.append("file", e.target.files[0]);
     const p = await api("/api/projects/import", form);
@@ -1708,18 +2403,20 @@ $("#manage-projects").onclick = () => {
       )
     )
       return;
-    await save();
+    await syncRecovery();
     await api(`/api/projects/${project.id}`, {}, "DELETE");
     await switchTo(null);
     toast("Project deleted.");
   });
 };
 $("#new-project").onclick = guard(async () => {
-  await save();
+  await syncRecovery();
   const p = await api("/api/projects", {
     name: "Untitled film " + (Object.keys(state.projects).length + 1),
   });
   state.projects[p.id] = p;
+  state.saved_projects ||= {};
+  state.saved_projects[p.id] = clone(p);
   project = clone(p);
   savedProject = clone(project);
   sceneId = p.scenes[0].id;
@@ -1734,6 +2431,11 @@ $("#modal").onclick = (e) => {
   if (e.target === $("#modal")) $("#modal").close();
 };
 window.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s" && !$("#modal").open) {
+    e.preventDefault();
+    if (e.shiftKey) showSaveAs(); else guard(manualSave)();
+    return;
+  }
   if (e.target.matches("input,textarea,select") || $("#modal").open) return;
   if (e.code === "Space") {
     e.preventDefault();
@@ -1742,10 +2444,6 @@ window.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
     e.preventDefault();
     historyStep(e.shiftKey);
-  }
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
-    e.preventDefault();
-    guard(save)();
   }
 });
 window.addEventListener("beforeunload", (e) => {
@@ -1765,9 +2463,10 @@ await guard(async () => {
       const draft = JSON.parse(unsaved);
       if (state.projects[draft.id]) {
         project = draft;
+        savedProject = clone(state.projects[draft.id]);
         dirty = true;
         toast(
-          "Recovered unsaved edits from this browser. Save or export them before switching projects.",
+          "Unfinished edits recovered. Use Save when you are ready to finalize them.",
         );
       }
     } catch {}
@@ -1781,6 +2480,7 @@ await guard(async () => {
       "Install the media dependencies to import, trim, and export audio/video.",
       true,
     );
+  offerRecovery();
   guard(checkConnection)();
   setInterval(() => guard(refresh)(), 3000);
   setInterval(() => guard(checkConnection)(), 15000);
