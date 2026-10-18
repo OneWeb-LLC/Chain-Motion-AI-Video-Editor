@@ -66,6 +66,17 @@ The editor and ComfyUI can run on different computers. GPU and memory requiremen
 
 FFmpeg selection is: `FFMPEG_BINARY`, then a system `ffmpeg`, then the binary supplied by `imageio-ffmpeg`. No Node.js installation is needed to run the app; Node is only used for JavaScript development tests.
 
+## OWeb satellite (Vercel)
+
+Frameforge can run as an **OWeb constellation satellite** (`app_id`: `frameforge`) on Vercel: shared OneID login, SSO return from [oweb.one](https://oweb.one), and workspace activation. See [docs/SATELLITE.md](docs/SATELLITE.md).
+
+```sh
+npm install
+FRAMEFORGE_API_URL=http://127.0.0.1:8787 npm run dev   # optional Python API in another terminal
+```
+
+Register the app in OWeb `ecosystem-apps.ts` and apply the `ff_profiles` migration on One OS before marking it live in the App Store.
+
 ## Installation and launch
 
 ### 1. Get the application
