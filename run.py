@@ -32,13 +32,26 @@ def main():
     binding.add_argument('--lan', action='store_true', help='Share the editor on your local network')
     binding.add_argument('--local-only', action='store_true', help='Start with access limited to this computer')
     parser.add_argument('--data', help='Portable library directory')
+    parser.add_argument(
+        '--satellite',
+        action='store_true',
+        help='OWeb satellite API: trust X-FF-* proxy headers and isolate libraries per workspace',
+    )
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error('Port must be between 1 and 65535.')
     if args.data:
         os.environ['FRAMEFORGE_DATA'] = args.data
+    if args.satellite:
+        os.environ['FRAMEFORGE_SATELLITE'] = '1'
+        if not os.environ.get('FRAMEFORGE_PROXY_SECRET'):
+            parser.error('--satellite requires FRAMEFORGE_PROXY_SECRET in the environment')
     root = Path(os.environ.get('FRAMEFORGE_DATA', str(Path(__file__).resolve().parent / 'data')))
-    host = args.host or ('0.0.0.0' if args.lan or (not args.local_only and saved_lan(root)) else '127.0.0.1')
+    host = args.host or (
+        '0.0.0.0'
+        if args.satellite or args.lan or (not args.local_only and saved_lan(root))
+        else '127.0.0.1'
+    )
     if host == '0.0.0.0':
         print(f'On this computer: http://127.0.0.1:{args.port}', flush=True)
         for address in lan_addresses():

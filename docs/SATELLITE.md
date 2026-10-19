@@ -19,7 +19,16 @@ Post-auth (native or SSO): server resolves workspace context, calls OWeb activat
 
 ## Editor API (ComfyUI backend)
 
-The browser editor calls `/api/*` on the same origin. On Vercel, set **`FRAMEFORGE_API_URL`** to a reachable Frameforge Python service (`run.py`) so Next.js can rewrite `/api/*` to that host. Without it, the UI loads after login but generation and library APIs are unavailable.
+The browser editor calls `/api/*` on the same origin. Next.js proxies those requests through **`/api/backend/*`** (authenticated) to **`FRAMEFORGE_API_URL`** (`run.py --satellite`), attaching workspace context headers. Set matching **`FRAMEFORGE_PROXY_SECRET`** on Vercel and the Python host. Without `FRAMEFORGE_API_URL`, the UI loads after login but library/save/export APIs return `503 api_unavailable`.
+
+### Python API on Fly.io (reference)
+
+```sh
+fly secrets set FRAMEFORGE_PROXY_SECRET=<same-as-vercel>
+fly deploy
+```
+
+Point Vercel `FRAMEFORGE_API_URL` at the Fly app URL (`https://frameforge-api-oweb.fly.dev`).
 
 Local development:
 

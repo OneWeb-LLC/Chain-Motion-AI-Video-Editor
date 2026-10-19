@@ -5,5 +5,12 @@ export async function middleware(request) {
 }
 
 export const config = {
-  matcher: ['/studio/:path*', '/login', '/sso'],
+  matcher: [
+    '/studio/:path*',
+    '/login',
+    '/sso',
+    '/static/index.html',
+    '/static/set-studio.html',
+    '/api/backend/:path*',
+  ],
 };

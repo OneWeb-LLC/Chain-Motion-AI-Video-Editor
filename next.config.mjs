@@ -1,14 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   async rewrites() {
-    const backend = process.env.FRAMEFORGE_API_URL?.replace(/\/$/, '');
-    if (!backend) {
-      return [];
-    }
     return [
       {
-        source: '/api/:path*',
-        destination: `${backend}/api/:path*`,
+        source: '/api/:path((?!auth/|sso/|satellite/|library/|backend/).*)',
+        destination: '/api/backend/:path',
       },
     ];
   },
