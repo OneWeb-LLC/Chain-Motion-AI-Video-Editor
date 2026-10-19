@@ -19,9 +19,12 @@ from .workflows import DEFAULT_MODELS
 from . import media, scene_writer, cloud
 from .hosting import is_local
 from .store import generation_order
+from . import satellite
 
 ROOT = Path(__file__).resolve().parent.parent
-store = Store(os.environ.get('FRAMEFORGE_DATA', str(ROOT/'data')))
+_default_store = Store(os.environ.get('FRAMEFORGE_DATA', str(ROOT/'data')))
+satellite.configure_default_store(_default_store)
+store = satellite.StoreProxy() if satellite.satellite_enabled() else _default_store
 app = FastAPI(title='Frameforge local video editor')
 
 
@@ -32,14 +35,32 @@ async def value_error(request, e):
 
 @app.middleware('http')
 async def local_only(request: Request, call_next):
-    hosting = getattr(app.state, 'hosting', None)
-    if hosting and not hosting.lan and not is_local(request.client.host if request.client else ''):
-        return JSONResponse({'detail':'This editor is in local-only mode.'}, status_code=403)
-    if request.method in ('POST','PUT','PATCH','DELETE'):
-        origin = request.headers.get('origin')
-        if origin and origin != str(request.base_url).rstrip('/'):
-            return JSONResponse({'detail':'Cross-origin writes are not allowed.'},status_code=403)
-    response = await call_next(request)
+    token = None
+    if satellite.satellite_enabled():
+        secret = satellite.proxy_secret()
+        if not secret or request.headers.get('x-ff-proxy-secret') != secret:
+            return JSONResponse({'detail': 'Unauthorized satellite proxy'}, status_code=401)
+        workspace_id = request.headers.get('x-ff-workspace-id')
+        user_id = request.headers.get('x-ff-user-id')
+        if not workspace_id or not user_id:
+            return JSONResponse({'detail': 'Missing workspace context'}, status_code=400)
+        try:
+            token = satellite.bind_request_store(workspace_id)
+        except ValueError as e:
+            return JSONResponse({'detail': str(e)}, status_code=400)
+    else:
+        hosting = getattr(app.state, 'hosting', None)
+        if hosting and not hosting.lan and not is_local(request.client.host if request.client else ''):
+            return JSONResponse({'detail':'This editor is in local-only mode.'}, status_code=403)
+        if request.method in ('POST','PUT','PATCH','DELETE'):
+            origin = request.headers.get('origin')
+            if origin and origin != str(request.base_url).rstrip('/'):
+                return JSONResponse({'detail':'Cross-origin writes are not allowed.'},status_code=403)
+    try:
+        response = await call_next(request)
+    finally:
+        if token is not None:
+            satellite.reset_request_store(token)
     response.headers['X-Content-Type-Options'] = 'nosniff'
     return response
 

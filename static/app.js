@@ -51,6 +51,7 @@ let state,
   playingSequence = false,
   refreshing = false;
 let speechDraft = {};
+let satelliteConfig = { mode: "local", api_configured: true };
 async function api(path, body, method = "POST") {
   const r = await fetch(path, {
     method: body === undefined ? "GET" : method,
@@ -1675,7 +1676,7 @@ async function showSettings() {
 }
 function jobsHTML() {
   let jobs = [...state.jobs].reverse();
-  return `<div class="stat-grid"><div class="stat"><strong>${jobs.filter((j) => activeStatuses.includes(j.status)).length}</strong><span>Active & queued</span></div><div class="stat"><strong>${jobs.filter((j) => j.status === "completed").length}</strong><span>Completed</span></div><div class="stat"><strong>${connectionState?.stats?.devices?.[0] ? Math.round(connectionState.stats.devices[0].vram_free / 1024 ** 3) + " GB" : "—"}</strong><span>Free GPU memory</span></div></div>${connectionState?.stats?.devices?.[0] ? `<p class="hint">${esc(connectionState.stats.devices[0].name)}</p>` : ""}<div id="job-list">${jobs.map((j) => `<article class="job"><div class="row between"><span class="job-name">${esc(j.name)}${j.inference === "cloud" ? " · Cloud Add Guide" : ""}</span><span class="badge ${j.status}">${j.status}</span></div><div class="job-details">${esc(j.stage || "")} · ${j.started ? Math.round((j.finished || Date.now() / 1000) - j.started) + "s elapsed" : new Date(j.created * 1000).toLocaleTimeString()}${j.spec?.seed !== undefined ? "<br>Seed " + esc(j.spec.seed) : ""}${j.prompt_id ? "<br>Prompt " + esc(j.prompt_id) : ""}</div>${activeStatuses.includes(j.status) ? `<div class="progress"><div style="width:${j.progress ?? 3}%"></div></div>` : ""}${j.error ? `<div class="job-error">${esc(j.error)}</div>` : ""}<div class="row" style="margin-top:10px">${activeStatuses.includes(j.status) && j.kind !== "export" ? `<button data-cancel-job="${j.id}" class="small danger">Cancel job</button>` : ""}${j.download ? `<a href="${esc(j.download)}" download>Download export ↗</a>` : ""}${j.prompt_id ? `<a href="/api/jobs/${j.id}/graph" download class="subtle" style="font-size:10px">Workflow JSON</a>` : ""}${(j.results || []).map((aid) => `<button class="small" data-result="${aid}">Open ${state.assets[aid]?.kind || "asset"}</button>`).join("")}</div></article>`).join("") || '<div class="empty-assets"><b>Your queue is clear</b>Queue one shot or an entire scene.<br>Generations run one at a time to fit consumer hardware.</div>'}</div>`;
+  return `<div class="stat-grid"><div class="stat"><strong>${jobs.filter((j) => activeStatuses.includes(j.status)).length}</strong><span>Active & queued</span></div><div class="stat"><strong>${jobs.filter((j) => j.status === "completed").length}</strong><span>Completed</span></div><div class="stat"><strong>${connectionState?.stats?.devices?.[0] ? Math.round(connectionState.stats.devices[0].vram_free / 1024 ** 3) + " GB" : "—"}</strong><span>Free GPU memory</span></div></div>${connectionState?.stats?.devices?.[0] ? `<p class="hint">${esc(connectionState.stats.devices[0].name)}</p>` : ""}<div id="job-list">${jobs.map((j) => `<article class="job"><div class="row between"><span class="job-name">${esc(j.name)}${j.inference === "cloud" ? " · Cloud Add Guide" : ""}</span><span class="badge ${j.status}">${j.status}</span></div><div class="job-details">${esc(j.stage || "")} · ${j.started ? Math.round((j.finished || Date.now() / 1000) - j.started) + "s elapsed" : new Date(j.created * 1000).toLocaleTimeString()}${j.spec?.seed !== undefined ? "<br>Seed " + esc(j.spec.seed) : ""}${j.prompt_id ? "<br>Prompt " + esc(j.prompt_id) : ""}</div>${activeStatuses.includes(j.status) ? `<div class="progress"><div style="width:${j.progress ?? 3}%"></div></div>` : ""}${j.error ? `<div class="job-error">${esc(j.error)}</div>` : ""}<div class="row" style="margin-top:10px">${activeStatuses.includes(j.status) && j.kind !== "export" ? `<button data-cancel-job="${j.id}" class="small danger">Cancel job</button>` : ""}${j.download ? `<a href="${esc(j.download)}" download>Download export ↗</a>` : ""}${j.download && j.kind === "export" && satelliteConfig.mode === "satellite" ? `<button class="small" data-publish-export="${j.id}">Save to workspace library</button>` : ""}${j.prompt_id ? `<a href="/api/jobs/${j.id}/graph" download class="subtle" style="font-size:10px">Workflow JSON</a>` : ""}${(j.results || []).map((aid) => `<button class="small" data-result="${aid}">Open ${state.assets[aid]?.kind || "asset"}</button>`).join("")}</div></article>`).join("") || '<div class="empty-assets"><b>Your queue is clear</b>Queue one shot or an entire scene.<br>Generations run one at a time to fit consumer hardware.</div>'}</div>`;
 }
 function showJobs() {
   modal(
@@ -1703,6 +1704,30 @@ function bindJobs() {
   );
   $$("[data-result]").forEach(
     (b) => (b.onclick = () => showAsset(b.dataset.result)),
+  );
+  $$("[data-publish-export]").forEach(
+    (b) =>
+      (b.onclick = guard(async () => {
+        b.disabled = true;
+        try {
+          const res = await fetch("/api/library/publish-export", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              job_id: b.dataset.publishExport,
+              project_id: project.id,
+              name: project.name,
+            }),
+          });
+          const payload = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            throw new Error(payload.detail || payload.error || res.statusText);
+          }
+          toast("Export saved to workspace library.");
+        } finally {
+          b.disabled = false;
+        }
+      })),
   );
 }
 function showSpeech() {
@@ -2453,6 +2478,20 @@ window.addEventListener("beforeunload", (e) => {
   }
 });
 await guard(async () => {
+  try {
+    const cfg = await fetch("/api/satellite/config").then((r) => r.json());
+    if (cfg?.mode === "satellite") {
+      satelliteConfig = cfg;
+      $("#studio-mode-label")?.textContent = "OWEB STUDIO";
+      $("#project-summary").textContent = "24 FPS · OWEB WORKSPACE";
+      if (!cfg.api_configured) {
+        toast(
+          "Editor API is not connected. Import, save, and export need FRAMEFORGE_API_URL on the satellite.",
+          true,
+        );
+      }
+    }
+  } catch {}
   state = await api("/api/state");
   const pid = localStorage.getItem("frameforge-project");
   project = clone(state.projects[pid] || Object.values(state.projects)[0]);
