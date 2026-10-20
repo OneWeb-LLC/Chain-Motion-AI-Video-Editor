@@ -47,3 +47,7 @@ Vercel project `chain-motion-ai-video-editor-oweb` (`prj_F7iBkORwslWKM1TXkTUexfU
 | Authenticated proxy | `/api/backend/*` returns **503** when `FRAMEFORGE_API_URL` unset; otherwise redirects unauthenticated callers to login |
 
 **Blocker for ONE-205 browser acceptance:** deploy `run.py --satellite` (see `fly.toml` / `Dockerfile`), set matching secrets on Fly + Vercel, redeploy satellite. No mock UI path.
+
+## QA / OneID synthetic tester
+
+Use the **ONE-202 shared fixture contract** only — see [docs/QA_FIXTURE.md](docs/QA_FIXTURE.md). Never post `FF_QA_*` credentials in Linear, GitHub, or agent threads.
