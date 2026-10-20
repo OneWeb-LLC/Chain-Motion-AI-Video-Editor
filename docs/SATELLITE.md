@@ -17,9 +17,21 @@ This Vercel deployment is an OWeb constellation satellite. Identity, workspaces,
 
 Post-auth (native or SSO): server resolves workspace context, calls OWeb activation APIs (with RPC fallback), upserts `ff_profiles`, then opens the editor at `/static/index.html` via `/studio`.
 
-## Editor API (ComfyUI backend)
+## Architecture (generation vs editing)
+
+| Layer | Owner | Role |
+| --- | --- | --- |
+| **Media generation** | OWeb ONE-190 (Runpod serverless ComfyUI) | Produces playable video/audio assets upstream |
+| **Frameforge satellite (this repo, Vercel)** | ONE-205 | OneID shell, workspace activation, static editor UI |
+| **Frameforge editing API** | `run.py --satellite` (Fly or other host) | Import, timeline trim, save, export — **not** a GPU ComfyUI runtime |
+
+Runpod/ComfyUI is optional inside the Python host for **generation** features only. The OWeb acceptance path for ONE-205 uses a **synthetic clip** (no paid generation): import → edit → save → export → `ff_workspace_exports` / oDrive handoff (ONE-188).
+
+## Editor API (`run.py --satellite`)
 
 The browser editor calls `/api/*` on the same origin. Next.js proxies those requests through **`/api/backend/*`** (authenticated) to **`FRAMEFORGE_API_URL`** (`run.py --satellite`), attaching workspace context headers. Set matching **`FRAMEFORGE_PROXY_SECRET`** on Vercel and the Python host. Without `FRAMEFORGE_API_URL`, the UI loads after login but library/save/export APIs return `503 api_unavailable`.
+
+Production audit (read-only): `node scripts/audit-production-satellite.mjs`
 
 ### Python API on Fly.io (reference)
 
