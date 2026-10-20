@@ -11,6 +11,7 @@
     "smoke:satellite": "node scripts/smoke-satellite.mjs",
     "audit:production": "node scripts/audit-production-satellite.mjs",
     "e2e:satellite-api": "bash scripts/e2e-satellite-api.sh",
+    "test:browser-acceptance": "node scripts/browser-acceptance.mjs",
     "sync:static": "mkdir -p public && rm -rf public/static && cp -r static public/static"
   },
   "dependencies": {
