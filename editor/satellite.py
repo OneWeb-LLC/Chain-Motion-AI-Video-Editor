@@ -68,3 +68,17 @@ def bind_request_store(workspace_id: str):
 
 def reset_request_store(token) -> None:
     _store_ctx.reset(token)
+
+
+def all_workspace_stores() -> list[Store]:
+    with _store_cache_lock:
+        return list(_store_cache.values())
+
+
+def run_in_store(store: Store, fn):
+    """Run callable with satellite StoreProxy bound to a concrete workspace store."""
+    token = _store_ctx.set(store)
+    try:
+        return fn()
+    finally:
+        _store_ctx.reset(token)

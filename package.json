@@ -9,6 +9,8 @@
     "start": "next start",
     "test": "node --test tests/*.test.mjs",
     "smoke:satellite": "node scripts/smoke-satellite.mjs",
+    "audit:production": "node scripts/audit-production-satellite.mjs",
+    "e2e:satellite-api": "bash scripts/e2e-satellite-api.sh",
     "sync:static": "mkdir -p public && rm -rf public/static && cp -r static public/static"
   },
   "dependencies": {

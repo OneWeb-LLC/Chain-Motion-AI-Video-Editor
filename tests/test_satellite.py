@@ -29,6 +29,18 @@ class SatelliteStoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             satellite.store_for_workspace('../escape')
 
+    def test_run_in_store_binds_active_store(self):
+        ws = satellite.store_for_workspace('cccccccccccccccccccccccccccccccc')
+        ws.data['marker'] = True
+        seen = []
+
+        def capture():
+            seen.append(satellite.active_store().root)
+
+        satellite.run_in_store(ws, capture)
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0], ws.root)
+
 
 if __name__ == '__main__':
     unittest.main()

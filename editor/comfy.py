@@ -8,6 +8,7 @@ import requests
 from . import media
 from .store import uid, segment_source, apply_generated_take
 from .workflows import h3_graph, speech_graph, encode_graph, validate_graph, h3_frames, h3_cloud_graph
+from . import satellite
 
 
 class Comfy:
@@ -67,15 +68,40 @@ class JobRunner:
 
     def loop(self):
         while not self.stop.is_set():
-            jobs = self.store.snapshot()['jobs']
-            j = next((j for j in jobs if j['status'] in ('queued','recovering')), None)
-            if not j:
+            if satellite.satellite_enabled():
+                stores = satellite.all_workspace_stores()
+            else:
+                stores = [self.store]
+            j = None
+            bound = None
+            for candidate_store in stores:
+                jobs = candidate_store.snapshot()['jobs']
+                j = next((job for job in jobs if job['status'] in ('queued', 'recovering')), None)
+                if j:
+                    bound = candidate_store
+                    break
+            if not j or bound is None:
                 self.stop.wait(0.5)
                 continue
+
+            def run_job():
+                try:
+                    self.run(j)
+                except Exception as e:
+                    bound.update_job(
+                        j['id'],
+                        status='cancelled' if self.cancelled(j['id']) else 'failed',
+                        error=str(e),
+                        finished=time.time(),
+                    )
+
             try:
-                self.run(j)
-            except Exception as e:
-                self.store.update_job(j['id'], status='cancelled' if self.cancelled(j['id']) else 'failed', error=str(e), finished=time.time())
+                if satellite.satellite_enabled():
+                    satellite.run_in_store(bound, run_job)
+                else:
+                    run_job()
+            except Exception:
+                pass
 
     def run(self, j):
         s = self.store

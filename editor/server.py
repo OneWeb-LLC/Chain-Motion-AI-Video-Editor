@@ -674,16 +674,38 @@ def export(body:dict):
     with store.lock:
         store.data['jobs'].append(task)
         store.save()
+    bound = satellite.active_store() if satellite.satellite_enabled() else store
+
     def work():
-        try:
-            assets=snap['assets']
+        def run():
+            assets = snap['assets']
             for a in assets.values():
-                a['_path']=str(store.asset_path(a))
-            result=media.export_sequence(p,assets,store.root/'exports'/eid,body['mode'])
-            store.update_job(eid,status='completed',stage='Export ready',download=f'/api/exports/{eid}/{result.name}',finished=time.time(),progress=100)
+                a['_path'] = str(bound.asset_path(a))
+            result = media.export_sequence(p, assets, bound.root / 'exports' / eid, body['mode'])
+            bound.update_job(
+                eid,
+                status='completed',
+                stage='Export ready',
+                download=f'/api/exports/{eid}/{result.name}',
+                finished=time.time(),
+                progress=100,
+            )
+
+        try:
+            if satellite.satellite_enabled():
+                satellite.run_in_store(bound, run)
+            else:
+                run()
         except Exception as e:
-            store.update_job(eid,status='failed',error=str(e),finished=time.time())
-    threading.Thread(target=work,daemon=True).start()
+            try:
+                if satellite.satellite_enabled():
+                    satellite.run_in_store(bound, lambda: bound.update_job(eid, status='failed', error=str(e), finished=time.time()))
+                else:
+                    bound.update_job(eid, status='failed', error=str(e), finished=time.time())
+            except StopIteration:
+                pass
+
+    threading.Thread(target=work, daemon=True).start()
     return task
 
 

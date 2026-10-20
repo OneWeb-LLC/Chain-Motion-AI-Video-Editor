@@ -34,3 +34,16 @@ This satellite intentionally **does not** ship `SUPABASE_SERVICE_ROLE_KEY`. SSO 
 
 - `SUPABASE_SERVICE_ROLE_KEY` (centralized on OWeb only)
 - Comfy Cloud / LLM API keys in Vercel env (stay on the Python library host)
+
+## Production audit (2026-10-20)
+
+Vercel project `chain-motion-ai-video-editor-oweb` (`prj_F7iBkORwslWKM1TXkTUexfUGsvXw`), deployment `241cca0`:
+
+| Check | Result |
+| --- | --- |
+| `/api/satellite/config` | `api_configured: false` — **`FRAMEFORGE_API_URL` and `FRAMEFORGE_PROXY_SECRET` not set on Vercel** |
+| Supabase `ff_workspace_exports` + `ff-workspace-library` bucket | Present (migration applied) |
+| Fly app `frameforge-api-oweb.fly.dev` | **DNS does not resolve** — API host not deployed or not registered |
+| Authenticated proxy | `/api/backend/*` returns **503** when `FRAMEFORGE_API_URL` unset; otherwise redirects unauthenticated callers to login |
+
+**Blocker for ONE-205 browser acceptance:** deploy `run.py --satellite` (see `fly.toml` / `Dockerfile`), set matching secrets on Fly + Vercel, redeploy satellite. No mock UI path.
